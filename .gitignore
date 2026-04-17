@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+node_modules/
+dist/
+
+__pycache__/
+*.py[cod]
+
+backend/acmis.db-shm
+backend/acmis.db-wal
+
+.env
+.env.*

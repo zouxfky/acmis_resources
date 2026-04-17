@@ -1,0 +1,50 @@
+import os
+from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+DB_PATH = BASE_DIR / "acmis.db"
+SESSION_COOKIE = "acmis_session"
+SESSION_MAX_AGE = 60 * 60 * 12
+PBKDF2_ITERATIONS = 200_000
+PASSWORD_SCHEME = "pbkdf2_sha256"
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+SESSION_TOUCH_INTERVAL_SECONDS = 5 * 60
+APP_ENV = os.environ.get("ACMIS_ENV", "development").strip().lower()
+COOKIE_SECURE = os.environ.get("ACMIS_COOKIE_SECURE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+if os.environ.get("ACMIS_COOKIE_SECURE") is None:
+    COOKIE_SECURE = APP_ENV != "development"
+TRUST_PROXY_HEADERS = os.environ.get("ACMIS_TRUST_PROXY_HEADERS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+LOGIN_WINDOW_SECONDS = 10 * 60
+LOGIN_LOCK_SECONDS = 15 * 60
+LOGIN_MAX_FAILURES_PER_IP = 20
+LOGIN_MAX_FAILURES_PER_USERNAME = 5
+DEFAULT_MAX_SSH_KEYS_PER_USER = 12
+DEFAULT_MAX_JOIN_KEYS_PER_REQUEST = 5
+DEFAULT_MAX_CONTAINERS_PER_USER = 6
+SSH_LOGIN_TIMEOUT_SECONDS = 6
+CONTAINER_USER_HOME_ROOT = os.environ.get("ACMIS_CONTAINER_USER_HOME_ROOT", "/home").strip() or "/home"
+SSH_SYNC_COMMAND_TIMEOUT_SECONDS = int(os.environ.get("ACMIS_SSH_SYNC_COMMAND_TIMEOUT_SECONDS", "12"))
+RUNTIME_MONITOR_ENABLED = os.environ.get("ACMIS_RUNTIME_MONITOR_ENABLED", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+RUNTIME_MONITOR_INTERVAL_SECONDS = int(os.environ.get("ACMIS_RUNTIME_MONITOR_INTERVAL_SECONDS", "60"))
+RUNTIME_MONITOR_OFFLINE_INTERVAL_SECONDS = int(
+    os.environ.get("ACMIS_RUNTIME_MONITOR_OFFLINE_INTERVAL_SECONDS", "600")
+)
+RUNTIME_MONITOR_MAX_WORKERS = int(os.environ.get("ACMIS_RUNTIME_MONITOR_MAX_WORKERS", "3"))
+RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS = int(os.environ.get("ACMIS_RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS", "10"))
+RUNTIME_COLLECT_TOTAL_TIMEOUT_SECONDS = int(os.environ.get("ACMIS_RUNTIME_COLLECT_TOTAL_TIMEOUT_SECONDS", "20"))
