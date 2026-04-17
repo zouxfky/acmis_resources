@@ -5,6 +5,34 @@ import { useAuthController } from "./useAuthController";
 import { useWorkspaceController } from "./useWorkspaceController";
 
 
+function fallbackCopyText(text) {
+  if (typeof document === "undefined") {
+    return false;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+
+  return copied;
+}
+
+
 export function useAppController() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [activeAccountPanel, setActiveAccountPanel] = useState(null);
@@ -196,7 +224,11 @@ export function useAppController() {
     }
 
     try {
-      await navigator.clipboard.writeText(sshCommand);
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(sshCommand);
+      } else if (!fallbackCopyText(sshCommand)) {
+        throw new Error("fallback-copy-failed");
+      }
       showFloatingTip("SSH 命令已复制", "success", containerId);
     } catch {
       showFloatingTip("复制失败", "error", containerId);
