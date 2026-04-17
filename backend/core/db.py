@@ -19,6 +19,7 @@ def begin_immediate(connection: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     from backend.features.runtime import create_runtime_schema_tables, upsert_container_runtime_system
+    from backend.core.security import hash_password
 
     with get_connection() as connection:
         connection.execute(
@@ -130,4 +131,33 @@ def init_db() -> None:
         ).fetchall()
         for row in container_rows:
             upsert_container_runtime_system(connection, int(row["id"]))
+
+        user_count_row = connection.execute("SELECT COUNT(1) AS count FROM users").fetchone()
+        user_count = int(user_count_row["count"]) if user_count_row else 0
+        if user_count == 0:
+            connection.execute(
+                """
+                INSERT INTO users (
+                    username,
+                    real_name,
+                    password_hash,
+                    role,
+                    status,
+                    max_ssh_keys_per_user,
+                    max_join_keys_per_request,
+                    max_containers_per_user
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "admin",
+                    "Admin",
+                    hash_password("acmis@admin"),
+                    "admin",
+                    "active",
+                    12,
+                    5,
+                    6,
+                ),
+            )
         connection.commit()
