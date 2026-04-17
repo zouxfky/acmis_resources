@@ -9,7 +9,6 @@ from backend.core.helpers import (
     serialize_user,
     validate_container_status,
     validate_linux_username,
-    validate_ssh_root_login,
     validate_user_role,
     validate_user_status,
 )
@@ -221,15 +220,27 @@ def update_admin_user(user_id: int, payload: AdminUserUpdatePayload, request: Re
     new_password = normalize_optional_text(payload.new_password)
 
     with get_connection() as connection:
-        existing = connection.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+        existing = connection.execute(
+            """
+            SELECT id, username, role, status
+            FROM users
+            WHERE id = ?
+            """,
+            (user_id,),
+        ).fetchone()
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
-        if existing["role"] == "admin":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户不允许编辑")
         if admin_user["id"] == user_id and user_status != "active":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能禁用当前登录的管理员账户")
         if admin_user["id"] == user_id and role != "admin":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能移除当前登录账户的管理员角色")
+        if existing["role"] == "admin":
+            if username != str(existing["username"]):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户暂不支持修改用户名")
+            if role != "admin":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户不能移除管理员角色")
+            if user_status != str(existing["status"]):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户暂不支持修改状态")
         if username != str(existing["username"]):
             joined_container_row = connection.execute(
                 """
@@ -429,7 +440,6 @@ def create_admin_container(payload: AdminContainerCreatePayload, request: Reques
     host = payload.host.strip()
     root_password = normalize_optional_text(payload.root_password) or ""
     container_status = validate_container_status(payload.status)
-    validate_ssh_root_login(host, payload.ssh_port, root_password)
     hardware_info = inspect_ssh_container_hardware(host, payload.ssh_port, root_password)
 
     try:
@@ -521,7 +531,6 @@ def update_admin_container(container_id: int, payload: AdminContainerUpdatePaylo
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="服务器不存在")
 
         effective_root_password = root_password or str(existing["root_password"] or "").strip()
-        validate_ssh_root_login(host, payload.ssh_port, effective_root_password)
         hardware_info = inspect_ssh_container_hardware(host, payload.ssh_port, effective_root_password)
 
         try:
