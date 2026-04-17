@@ -4,7 +4,7 @@ import shlex
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Iterator, Optional
 
 from fastapi import HTTPException, status
 
@@ -178,7 +178,7 @@ def _exec_ssh_command(client: "paramiko.SSHClient", command: str) -> str:
 def sync_container_user_authorized_keys(
     container_id: int,
     user_id: int,
-    public_keys_override: list[str] | None = None,
+    public_keys_override: Optional[list[str]] = None,
 ) -> None:
     if paramiko is None:
         raise HTTPException(
