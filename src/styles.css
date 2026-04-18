@@ -1950,6 +1950,30 @@ button:disabled {
   line-height: 1.4;
 }
 
+.container-runtime-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.container-process-toggle {
+  min-width: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  line-height: 1.2;
+  color: rgba(255, 241, 201, 0.82);
+  border-color: rgba(255, 241, 201, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.container-process-toggle:hover {
+  border-color: rgba(255, 241, 201, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .container-process-chip-list {
   display: grid;
   gap: 8px;

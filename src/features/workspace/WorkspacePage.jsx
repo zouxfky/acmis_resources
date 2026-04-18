@@ -1,4 +1,4 @@
-import { splitProcessDisplay } from "../../utils/formatters";
+import { useState } from "react";
 
 const containerStatusLabelMap = {
   active: "在线",
@@ -32,6 +32,14 @@ export function WorkspacePage({
   const sshConnectionLimitLabel = Number.isFinite(maxJoinedContainerCount) && maxJoinedContainerCount > 0
     ? `上限 ${maxJoinedContainerCount} 台`
     : "";
+  const [expandedProcessContainerIds, setExpandedProcessContainerIds] = useState({});
+
+  function toggleProcessList(containerId) {
+    setExpandedProcessContainerIds((current) => ({
+      ...current,
+      [containerId]: !current[containerId]
+    }));
+  }
 
   return (
     <>
@@ -118,6 +126,11 @@ export function WorkspacePage({
               const leaveButtonLabel = isCooldownActive ? `冷却中 ${cooldownLabel}` : "退出容器";
               const statusLabel = containerStatusLabelMap[container.status] || container.status || "未知";
               const statusClassName = containerStatusClassMap[container.status] || "";
+              const processListExpanded = Boolean(expandedProcessContainerIds[container.id]);
+              const visibleRuntimeProcesses = processListExpanded
+                ? container.runtimeProcesses
+                : container.runtimeProcesses.slice(0, 3);
+              const hiddenProcessCount = Math.max(0, container.runtimeProcesses.length - 3);
 
               return (
                 <article
@@ -243,25 +256,39 @@ export function WorkspacePage({
 
                       <div className="container-runtime-block">
                         <span className="container-runtime-label">GPU 占用进程</span>
-                        {container.processRuntimeAvailable && container.gpuProcesses.length > 0 ? (
+                        {container.processRuntimeAvailable && container.runtimeProcesses.length > 0 ? (
                           <>
                             <div className="container-process-chip-list">
-                              {container.gpuProcesses.slice(0, 3).map((processItem) => {
-                                const processDisplay = splitProcessDisplay(processItem);
+                              {visibleRuntimeProcesses.map((processItem) => {
                                 return (
                                   <div
                                     className="container-process-chip"
-                                    key={`${container.id}-${processItem}`}
-                                    title={`${processDisplay.owner} / ${processDisplay.command}`}
+                                    key={processItem.id}
+                                    title={`${processItem.owner} / ${processItem.command}`}
                                   >
-                                    <span className="container-process-owner">{processDisplay.owner}</span>
-                                    <strong className="container-process-command">{processDisplay.command}</strong>
+                                    <span className="container-process-owner">{processItem.owner}</span>
+                                    <strong className="container-process-command">{processItem.command}</strong>
                                   </div>
                                 );
                               })}
                             </div>
-                            {container.gpuProcesses.length > 3 ? (
-                              <p className="container-runtime-meta">另有 {container.gpuProcesses.length - 3} 个进程</p>
+                            {hiddenProcessCount > 0 || processListExpanded ? (
+                              <div className="container-runtime-meta-row">
+                                {hiddenProcessCount > 0 && !processListExpanded ? (
+                                  <p className="container-runtime-meta">另有 {hiddenProcessCount} 个进程</p>
+                                ) : (
+                                  <span className="container-runtime-meta">共 {container.runtimeProcesses.length} 个进程</span>
+                                )}
+                                {container.runtimeProcesses.length > 3 ? (
+                                  <button
+                                    className="ghost-button container-process-toggle"
+                                    type="button"
+                                    onClick={() => toggleProcessList(container.id)}
+                                  >
+                                    {processListExpanded ? "收起" : "展开全部"}
+                                  </button>
+                                ) : null}
+                              </div>
                             ) : null}
                           </>
                         ) : !container.processRuntimeAvailable ? (

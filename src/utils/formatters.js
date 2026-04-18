@@ -100,6 +100,18 @@ export function enrichWorkspaceContainer(container) {
   const gpuProcesses = Array.isArray(container.gpu_processes)
     ? container.gpu_processes.filter(Boolean)
     : [];
+  const runtimeProcesses = Array.isArray(container.runtime_processes)
+    ? container.runtime_processes
+        .filter((item) => item && typeof item === "object")
+        .map((item, index) => ({
+          id: Number.isFinite(Number(item.pid))
+            ? `${container.id}-pid-${Number(item.pid)}`
+            : `${container.id}-process-${index}`,
+          pid: Number.isFinite(Number(item.pid)) ? Number(item.pid) : null,
+          owner: String(item.process_user || item.linux_username || "未知用户"),
+          command: String(item.process_name || "").trim() || "-"
+        }))
+    : [];
   const runtimeGpus = Array.isArray(container.runtime_gpus)
     ? container.runtime_gpus
         .map((gpuRow, index) => {
@@ -153,6 +165,7 @@ export function enrichWorkspaceContainer(container) {
     memorySize: container.memory_size || "-",
     connectedUsers,
     gpuProcesses,
+    runtimeProcesses,
     runtimeGpus,
     gpuRuntimeAvailable,
     processRuntimeAvailable,
