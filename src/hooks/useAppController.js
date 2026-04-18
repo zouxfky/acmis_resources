@@ -1,37 +1,41 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 
 import { useAdminController } from "./useAdminController";
 import { useAuthController } from "./useAuthController";
 import { useWorkspaceController } from "./useWorkspaceController";
 
+async function copyTextToClipboard(text) {
+  const normalizedText = String(text ?? "");
 
-function fallbackCopyText(text) {
-  if (typeof document === "undefined") {
+  if (!normalizedText) {
     return false;
   }
 
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(normalizedText);
+    return true;
+  }
+
   const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "readonly");
+  textarea.value = normalizedText;
+  textarea.setAttribute("readonly", "true");
   textarea.style.position = "fixed";
-  textarea.style.top = "-9999px";
-  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+
   document.body.appendChild(textarea);
   textarea.focus();
   textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
 
-  let copied = false;
   try {
-    copied = document.execCommand("copy");
-  } catch {
-    copied = false;
+    return document.execCommand("copy");
   } finally {
     document.body.removeChild(textarea);
   }
-
-  return copied;
 }
-
 
 export function useAppController() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -213,7 +217,7 @@ export function useAppController() {
         await adminController.executeDeleteAdminContainer(pendingDialog.containerId);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "操作失败";
+      const message = error instanceof Error ? error.message : "鎿嶄綔澶辫触";
       workspaceController.setWorkspaceMessage(message);
     }
   }
@@ -224,14 +228,15 @@ export function useAppController() {
     }
 
     try {
-      if (navigator.clipboard?.writeText && window.isSecureContext) {
-        await navigator.clipboard.writeText(sshCommand);
-      } else if (!fallbackCopyText(sshCommand)) {
-        throw new Error("fallback-copy-failed");
+      const copied = await copyTextToClipboard(sshCommand);
+
+      if (!copied) {
+        throw new Error("copy failed");
       }
+
       showFloatingTip("SSH 命令已复制", "success", containerId);
     } catch {
-      showFloatingTip("复制失败", "error", containerId);
+      showFloatingTip("复制失败，请检查浏览器剪贴板权限", "error", containerId);
     }
   }
 
@@ -256,3 +261,4 @@ export function useAppController() {
     ...adminController
   };
 }
+
