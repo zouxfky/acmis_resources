@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAdminController } from "./useAdminController";
 import { useAuthController } from "./useAuthController";
@@ -217,7 +217,7 @@ export function useAppController() {
         await adminController.executeDeleteAdminContainer(pendingDialog.containerId);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "鎿嶄綔澶辫触";
+      const message = error instanceof Error ? error.message : "操作失败";
       workspaceController.setWorkspaceMessage(message);
     }
   }
@@ -261,4 +261,3 @@ export function useAppController() {
     ...adminController
   };
 }
-
