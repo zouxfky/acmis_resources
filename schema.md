@@ -18,10 +18,11 @@ CREATE TABLE users (
     real_name VARCHAR(128) NULL,
     password_hash TEXT NOT NULL,
     role ENUM('admin', 'user') NOT NULL DEFAULT 'user',
-    status ENUM('active', 'disabled') NOT NULL DEFAULT 'active',
-    max_ssh_keys_per_user INT NOT NULL DEFAULT 12,
-    max_join_keys_per_request INT NOT NULL DEFAULT 5,
-    max_containers_per_user INT NOT NULL DEFAULT 6
+    linux_uid INT NOT NULL UNIQUE,
+    linux_gid INT NOT NULL UNIQUE,
+    max_ssh_keys_per_user INT NOT NULL DEFAULT 5,
+    max_join_keys_per_request INT NOT NULL DEFAULT 3,
+    max_containers_per_user INT NOT NULL DEFAULT 3
 );
 ```
 
@@ -32,7 +33,8 @@ CREATE TABLE users (
 - `real_name`：用户姓名
 - `password_hash`：密码哈希，不存明文
 - `role`：角色，`admin` 或 `user`
-- `status`：账户状态，`active` 或 `disabled`
+- `linux_uid`：该用户在容器内固定使用的 Linux UID
+- `linux_gid`：该用户在容器内固定使用的 Linux GID
 - `max_ssh_keys_per_user`：该用户最多可保存多少把 SSH 公钥
 - `max_join_keys_per_request`：该用户单次加入容器时最多可选多少把 SSH 公钥
 - `max_containers_per_user`：该用户最多可加入多少台容器
@@ -82,7 +84,7 @@ CREATE TABLE containers (
     host VARCHAR(255) NOT NULL,
     ssh_port INT NOT NULL DEFAULT 22,
     root_password VARCHAR(255) NOT NULL DEFAULT '',
-    max_users INT NOT NULL DEFAULT 5,
+    max_users INT NOT NULL DEFAULT 3,
     gpu_model VARCHAR(128) NOT NULL,
     gpu_memory VARCHAR(64) NOT NULL,
     gpu_count INT NOT NULL DEFAULT 1,

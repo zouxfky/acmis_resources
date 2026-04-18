@@ -72,7 +72,6 @@ def login(payload: LoginPayload, request: Request, response: Response) -> dict:
                 real_name,
                 password_hash,
                 role,
-                status,
                 max_ssh_keys_per_user,
                 max_join_keys_per_request,
                 max_containers_per_user
@@ -82,7 +81,7 @@ def login(payload: LoginPayload, request: Request, response: Response) -> dict:
             (username,),
         ).fetchone()
 
-        if not user or user["status"] != "active" or not verify_password(payload.password, user["password_hash"]):
+        if not user or not verify_password(payload.password, user["password_hash"]):
             record_login_failure(connection, scopes)
             connection.commit()
             raise HTTPException(
@@ -145,7 +144,6 @@ def change_password(payload: ChangePasswordPayload, request: Request, response: 
                 username,
                 real_name,
                 role,
-                status,
                 max_ssh_keys_per_user,
                 max_join_keys_per_request,
                 max_containers_per_user

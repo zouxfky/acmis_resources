@@ -4,7 +4,6 @@ export const emptyAdminUserForm = {
   real_name: "",
   password: "",
   role: "user",
-  status: "active",
   new_password: "",
   max_ssh_keys_per_user: "",
   max_join_keys_per_request: "",

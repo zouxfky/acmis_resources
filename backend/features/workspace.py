@@ -123,17 +123,6 @@ def fetch_workspace_containers(user_id: int, container_ids: Optional[list[int]] 
         """
         connected_user_rows = connection.execute(connected_user_sql, connected_user_params).fetchall()
 
-        pending_sync_sql = """
-            SELECT container_id
-            FROM pending_container_user_syncs
-            WHERE user_id = ?
-        """
-        pending_sync_params: list[object] = [user_id]
-        if container_ids:
-            placeholders = ",".join("?" for _ in container_ids)
-            pending_sync_sql += f" AND container_id IN ({placeholders})"
-            pending_sync_params.extend(container_ids)
-        pending_sync_rows = connection.execute(pending_sync_sql, pending_sync_params).fetchall()
         process_user_rows = connection.execute(
             """
             SELECT username, COALESCE(real_name, username) AS display_name
@@ -149,8 +138,6 @@ def fetch_workspace_containers(user_id: int, container_ids: Optional[list[int]] 
     connected_user_map: dict[int, list[str]] = {}
     for row in connected_user_rows:
         connected_user_map.setdefault(row["container_id"], []).append(row["user_name"])
-
-    pending_sync_container_ids = {int(row["container_id"]) for row in pending_sync_rows}
 
     process_user_display_map = {
         str(row["username"]): str(row["display_name"])
@@ -211,7 +198,6 @@ def fetch_workspace_containers(user_id: int, container_ids: Optional[list[int]] 
                 "status": row["status"],
                 "active_user_count": row["active_user_count"],
                 "joined_key_ids": joined_key_map.get(row["id"], []),
-                "sync_pending": row["id"] in pending_sync_container_ids,
             }
         )
     return items
@@ -328,12 +314,11 @@ def join_workspace_container(
     request: Request,
 ) -> dict:
     user = require_authenticated_user(request, require_csrf=True)
-    result = join_workspace_container_access(user["id"], container_id, payload.ssh_key_ids)
+    join_workspace_container_access(user["id"], container_id, payload.ssh_key_ids)
 
     return {
         "ok": True,
         "message": "容器授权已更新",
-        "sync_pending": result["sync_pending"],
         "container": fetch_workspace_container(user["id"], container_id),
     }
 

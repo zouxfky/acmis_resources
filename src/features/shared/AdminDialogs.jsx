@@ -68,14 +68,6 @@ export function AdminDialogs({
                 </label>
 
                 <label className="field">
-                  <span>状态</span>
-                  <select value={adminUserForm.status} onChange={(event) => onUpdateAdminUserField("status", event.target.value)}>
-                    <option value="active">active</option>
-                    <option value="disabled">disabled</option>
-                  </select>
-                </label>
-
-                <label className="field">
                   <span>{adminUserForm.id ? "重置密码" : "初始密码"}</span>
                   <input
                     type="password"
@@ -171,7 +163,7 @@ export function AdminDialogs({
                     min="1"
                     value={adminContainerForm.max_users}
                     onChange={(event) => onUpdateAdminContainerField("max_users", event.target.value)}
-                    placeholder="5"
+                    placeholder="3"
                   />
                 </label>
 

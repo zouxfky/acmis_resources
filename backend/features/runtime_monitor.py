@@ -1,5 +1,4 @@
 import logging
-import re
 import threading
 import time
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
@@ -10,19 +9,33 @@ from backend.core.config import (
     RUNTIME_MONITOR_ENABLED,
     RUNTIME_MONITOR_INTERVAL_SECONDS,
     RUNTIME_MONITOR_MAX_WORKERS,
-    RUNTIME_MONITOR_OFFLINE_INTERVAL_SECONDS,
+    SSH_CONNECT_TIMEOUT_SECONDS,
     RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS,
 )
 from backend.core.db import begin_immediate, get_connection
-from backend.core.helpers import clamp_percent, parse_size_to_g
 from backend.features.container_ssh_access import (
     acquire_container_user_sync_lock,
+    fetch_container_joined_user_ids,
     sync_container_user_authorized_keys,
 )
-from backend.features.runtime import (
-    replace_container_runtime_gpus,
-    replace_container_runtime_processes,
-    upsert_container_runtime_system,
+from backend.features.runtime_collectors import (
+    CPU_COMMAND,
+    GPU_COMMAND,
+    LSOF_COMMAND,
+    MEMORY_COMMAND,
+    build_empty_system_payload,
+    build_ps_command,
+    build_runtime_timestamp,
+    exec_ssh_command,
+    fetch_runtime_container_row,
+    fetch_runtime_container_rows,
+    fetch_user_id_map,
+    merge_process_rows,
+    parse_gpu_output,
+    parse_lsof_output,
+    parse_ps_output,
+    parse_system_output,
+    save_runtime_snapshot,
 )
 
 try:
@@ -34,314 +47,33 @@ except ImportError:  # pragma: no cover - depends on local environment
 LOGGER = logging.getLogger(__name__)
 _INFLIGHT_IDS: set[int] = set()
 _INFLIGHT_LOCK = threading.Lock()
-_FAILURE_COUNTS: dict[int, int] = {}
-_FAILURE_COUNTS_LOCK = threading.Lock()
-_MAX_CONSECUTIVE_FAILURES_BEFORE_OFFLINE = 3
 _RUNTIME_NOTICE_KEYS: set[tuple[int, str, str]] = set()
 _RUNTIME_NOTICE_LOCK = threading.Lock()
-_LAST_OFFLINE_COLLECT_AT: dict[int, float] = {}
-_LAST_OFFLINE_COLLECT_AT_LOCK = threading.Lock()
-
-GPU_COMMAND = (
-    "nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu "
-    "--format=csv,noheader,nounits"
-)
-CPU_COMMAND = "top -bn1 | head -n 5"
-MEMORY_COMMAND = "free -b | awk 'NR==2 {print $2, $3}'"
-LSOF_COMMAND = r"lsof /dev/nvidia* 2>/dev/null | awk 'NR>1 {print $1, $2, $3}' | sort -u"
 
 
-def mib_to_g(value: float) -> float:
-    return round(float(value) / 1024.0, 1)
-
-
-def parse_gpu_output(output: str, timestamp: str) -> list[dict]:
-    gpu_rows: list[dict] = []
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = [item.strip() for item in line.split(",")]
-        if len(parts) < 5:
-            continue
-        try:
-            gpu_index = int(parts[0])
-            memory_total_mb = float(parts[2])
-            memory_used_mb = float(parts[3])
-            compute_percent = clamp_percent(float(parts[4]))
-        except ValueError:
-            continue
-
-        memory_percent = (
-            clamp_percent((memory_used_mb / memory_total_mb) * 100) if memory_total_mb > 0 else 0
-        )
-        gpu_rows.append(
-            {
-                "gpu_index": gpu_index,
-                "memory_total_g": mib_to_g(memory_total_mb),
-                "memory_used_g": mib_to_g(memory_used_mb),
-                "memory_percent": memory_percent,
-                "compute_percent": compute_percent,
-                "updated_at": timestamp,
-            }
-        )
-    return gpu_rows
-
-
-def parse_system_output(cpu_output: str, memory_output: str) -> dict:
-    cpu_percent = 0
-    memory_used_g = 0.0
-    memory_total_g = 0.0
-    memory_percent = 0
-
-    for raw_line in cpu_output.splitlines():
-        line = raw_line.strip()
-        if "%Cpu" in line and " id" in line:
-            idle_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*id", line)
-            if idle_match:
-                cpu_percent = clamp_percent(100 - float(idle_match.group(1)))
-
-    memory_parts = [item.strip() for item in re.split(r"[\s,]+", memory_output.strip()) if item.strip()]
-    if len(memory_parts) >= 2:
-        memory_total_g = parse_size_to_g(f"{memory_parts[0]}B")
-        memory_used_g = parse_size_to_g(f"{memory_parts[1]}B")
-        memory_percent = (
-            clamp_percent((memory_used_g / memory_total_g) * 100) if memory_total_g > 0 else 0
-        )
-
-    return {
-        "cpu_percent": cpu_percent,
-        "memory_used_g": round(memory_used_g, 1),
-        "memory_total_g": round(memory_total_g, 1),
-        "memory_percent": memory_percent,
-    }
-
-
-def parse_lsof_output(output: str) -> list[dict]:
-    items: list[dict] = []
-    seen_pids: set[int] = set()
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 2)
-        if len(parts) < 3:
-            continue
-        command_name, pid_text, linux_username = parts
-        try:
-            pid = int(pid_text)
-        except ValueError:
-            continue
-        if pid in seen_pids:
-            continue
-        seen_pids.add(pid)
-        items.append(
-            {
-                "command_name": command_name,
-                "pid": pid,
-                "linux_username": linux_username.strip(),
-            }
-        )
-    return items
-
-
-def build_ps_command(pid_items: list[dict]) -> Optional[str]:
-    if not pid_items:
-        return None
-    pid_list = ",".join(str(item["pid"]) for item in pid_items)
-    return f"ps -p {pid_list} -o pid=,user=,args="
-
-
-def parse_ps_output(output: str) -> dict[int, dict]:
-    process_map: dict[int, dict] = {}
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 2)
-        if len(parts) < 3:
-            continue
-        try:
-            pid = int(parts[0])
-        except ValueError:
-            continue
-        process_map[pid] = {
-            "pid": pid,
-            "linux_username": parts[1].strip(),
-            "process_name": parts[2].strip(),
-        }
-    return process_map
-
-
-def merge_process_rows(
-    lsof_rows: list[dict],
-    ps_map: dict[int, dict],
-    timestamp: str,
-    user_id_map: dict[str, int],
-) -> list[dict]:
-    process_rows: list[dict] = []
-    for item in lsof_rows:
-        process_detail = ps_map.get(item["pid"], {})
-        linux_username = process_detail.get("linux_username") or item["linux_username"]
-        process_name = process_detail.get("process_name") or item["command_name"]
-        process_rows.append(
-            {
-                "user_id": user_id_map.get(linux_username),
-                "linux_username": linux_username,
-                "pid": item["pid"],
-                "process_name": process_name,
-                "updated_at": timestamp,
-            }
-        )
-    return process_rows
-
-
-def fetch_runtime_container_rows() -> list[dict]:
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, name, host, ssh_port, root_password, gpu_count, gpu_memory, status
-            FROM containers
-            WHERE status IN ('active', 'offline')
-            ORDER BY id ASC
-            """
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def fetch_runtime_container_row(container_id: int) -> Optional[dict]:
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT id, name, host, ssh_port, root_password, gpu_count, gpu_memory, status
-            FROM containers
-            WHERE id = ?
-            """,
-            (container_id,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def fetch_user_id_map() -> dict[str, int]:
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, username
-            FROM users
-            ORDER BY id ASC
-            """
-        ).fetchall()
-    return {str(row["username"]): int(row["id"]) for row in rows}
-
-
-def save_runtime_snapshot(
-    container_id: int,
-    system_payload: dict,
-    gpu_rows: list[dict],
-    process_rows: list[dict],
-    timestamp: str,
-) -> None:
-    with get_connection() as connection:
-        begin_immediate(connection)
-        upsert_container_runtime_system(
-            connection,
-            container_id,
-            cpu_percent=system_payload["cpu_percent"],
-            memory_used_g=system_payload["memory_used_g"],
-            memory_total_g=system_payload["memory_total_g"],
-            memory_percent=system_payload["memory_percent"],
-            cpu_available=system_payload["cpu_available"],
-            memory_available=system_payload["memory_available"],
-            gpu_available=system_payload["gpu_available"],
-            processes_available=system_payload["processes_available"],
-            updated_at=timestamp,
-        )
-        replace_container_runtime_gpus(connection, container_id, gpu_rows)
-        replace_container_runtime_processes(connection, container_id, process_rows)
-        connection.commit()
-
-
-def enqueue_pending_container_user_sync(container_id: int, user_id: int) -> None:
-    with get_connection() as connection:
-        begin_immediate(connection)
-        connection.execute(
-            """
-            INSERT INTO pending_container_user_syncs (container_id, user_id, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(container_id, user_id) DO UPDATE SET
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (container_id, user_id),
-        )
-        connection.commit()
-
-
-def fetch_pending_container_user_sync_ids(container_id: int) -> list[int]:
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT user_id
-            FROM pending_container_user_syncs
-            WHERE container_id = ?
-            ORDER BY updated_at ASC, user_id ASC
-            """,
-            (container_id,),
-        ).fetchall()
-    return [int(row["user_id"]) for row in rows]
-
-
-def delete_pending_container_user_sync(container_id: int, user_id: int) -> None:
-    with get_connection() as connection:
-        begin_immediate(connection)
-        connection.execute(
-            """
-            DELETE FROM pending_container_user_syncs
-            WHERE container_id = ? AND user_id = ?
-            """,
-            (container_id, user_id),
-        )
-        connection.commit()
-
-
-def process_pending_container_user_syncs(container_id: int) -> None:
-    pending_user_ids = fetch_pending_container_user_sync_ids(container_id)
-    if not pending_user_ids:
-        return
-
-    for user_id in pending_user_ids:
+def sync_container_full_user_access(container_id: int) -> None:
+    for user_id in fetch_container_joined_user_ids(container_id):
         try:
             with acquire_container_user_sync_lock(container_id, user_id):
                 sync_container_user_authorized_keys(container_id, user_id)
-            delete_pending_container_user_sync(container_id, user_id)
         except Exception:
             LOGGER.exception(
-                "pending container ssh sync failed for container=%s user=%s",
+                "container full ssh sync failed for container=%s user=%s",
                 container_id,
                 user_id,
             )
-
-
-def prune_runtime_monitor_failure_counts(active_container_ids: set[int]) -> None:
-    with _FAILURE_COUNTS_LOCK:
-        stale_ids = [container_id for container_id in _FAILURE_COUNTS if container_id not in active_container_ids]
-        for container_id in stale_ids:
-            _FAILURE_COUNTS.pop(container_id, None)
-    with _LAST_OFFLINE_COLLECT_AT_LOCK:
-        stale_ids = [container_id for container_id in _LAST_OFFLINE_COLLECT_AT if container_id not in active_container_ids]
-        for container_id in stale_ids:
-            _LAST_OFFLINE_COLLECT_AT.pop(container_id, None)
 
 
 def update_container_monitor_status(
     container_id: int,
     target_status: str,
     allowed_current_statuses: tuple[str, ...],
-) -> None:
+) -> bool:
     placeholders = ",".join("?" for _ in allowed_current_statuses)
     params: list[object] = [target_status, container_id, *allowed_current_statuses]
     with get_connection() as connection:
         begin_immediate(connection)
-        connection.execute(
+        cursor = connection.execute(
             f"""
             UPDATE containers
             SET status = ?
@@ -351,57 +83,20 @@ def update_container_monitor_status(
             params,
         )
         connection.commit()
+    return int(cursor.rowcount or 0) > 0
 
 
 def mark_runtime_collect_success(container_id: int) -> None:
-    with _FAILURE_COUNTS_LOCK:
-        _FAILURE_COUNTS.pop(container_id, None)
-    with _LAST_OFFLINE_COLLECT_AT_LOCK:
-        _LAST_OFFLINE_COLLECT_AT.pop(container_id, None)
     update_container_monitor_status(container_id, "active", ("offline",))
 
 
 def mark_runtime_collect_failure(container_id: int, container_name: str) -> None:
-    with _FAILURE_COUNTS_LOCK:
-        next_failure_count = _FAILURE_COUNTS.get(container_id, 0) + 1
-        _FAILURE_COUNTS[container_id] = next_failure_count
-
-    if next_failure_count < _MAX_CONSECUTIVE_FAILURES_BEFORE_OFFLINE:
-        return
-
     LOGGER.warning(
-        "runtime monitor marked container %s(%s) offline after %s consecutive failures",
+        "runtime monitor marked container %s(%s) offline after two failed connect attempts in the same round",
         container_name,
         container_id,
-        next_failure_count,
     )
     update_container_monitor_status(container_id, "offline", ("active",))
-
-
-def build_empty_system_payload() -> dict:
-    return {
-        "cpu_percent": 0,
-        "memory_used_g": 0.0,
-        "memory_total_g": 0.0,
-        "memory_percent": 0,
-        "cpu_available": False,
-        "memory_available": False,
-        "gpu_available": False,
-        "processes_available": False,
-    }
-
-
-def should_collect_container_now(container_row: dict, now: float) -> bool:
-    if str(container_row.get("status")) != "offline":
-        return True
-
-    container_id = int(container_row["id"])
-    with _LAST_OFFLINE_COLLECT_AT_LOCK:
-        last_collected_at = _LAST_OFFLINE_COLLECT_AT.get(container_id, 0.0)
-        if now - last_collected_at < RUNTIME_MONITOR_OFFLINE_INTERVAL_SECONDS:
-            return False
-        _LAST_OFFLINE_COLLECT_AT[container_id] = now
-    return True
 
 
 def _normalize_runtime_error_text(exc: Exception) -> str:
@@ -442,19 +137,6 @@ def _log_runtime_component_failure(component: str, container_name: str, containe
     )
 
 
-def exec_ssh_command(client, command: str, timeout: int, allowed_exit_codes: Optional[set[int]] = None) -> str:
-    stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
-    del stdin
-    output = stdout.read().decode("utf-8", errors="replace")
-    error_output = stderr.read().decode("utf-8", errors="replace").strip()
-    exit_code = stdout.channel.recv_exit_status()
-    if allowed_exit_codes and exit_code in allowed_exit_codes:
-        return output
-    if exit_code != 0:
-        raise RuntimeError(error_output or f"远端命令执行失败: {command}")
-    return output
-
-
 class RuntimeMonitorService:
     def __init__(self) -> None:
         self._stop_event = threading.Event()
@@ -473,9 +155,8 @@ class RuntimeMonitorService:
         self._thread = threading.Thread(target=self._run_loop, name="acmis-runtime-monitor", daemon=True)
         self._thread.start()
         LOGGER.info(
-            "runtime monitor started: interval=%ss offline_interval=%ss max_workers=%s",
+            "runtime monitor started: interval=%ss max_workers=%s",
             RUNTIME_MONITOR_INTERVAL_SECONDS,
-            RUNTIME_MONITOR_OFFLINE_INTERVAL_SECONDS,
             RUNTIME_MONITOR_MAX_WORKERS,
         )
 
@@ -499,12 +180,6 @@ class RuntimeMonitorService:
 
     def collect_once(self) -> None:
         container_rows = fetch_runtime_container_rows()
-        if not container_rows:
-            prune_runtime_monitor_failure_counts(set())
-            return
-        prune_runtime_monitor_failure_counts({int(row["id"]) for row in container_rows})
-        now = time.time()
-        container_rows = [row for row in container_rows if should_collect_container_now(row, now)]
         if not container_rows:
             return
 
@@ -554,6 +229,7 @@ def collect_container_runtime_now(container_id: int) -> bool:
 def collect_container_runtime_row(container_row: dict) -> bool:
     container_id = int(container_row["id"])
     container_name = str(container_row["name"])
+    was_offline = str(container_row.get("status")) == "offline"
     with _INFLIGHT_LOCK:
         if container_id in _INFLIGHT_IDS:
             return False
@@ -563,14 +239,30 @@ def collect_container_runtime_row(container_row: dict) -> bool:
         collection_state = _collect_container_runtime_inner(container_row)
         if collection_state == "success":
             mark_runtime_collect_success(container_id)
-            process_pending_container_user_syncs(container_id)
+            if was_offline:
+                sync_container_full_user_access(container_id)
             return True
         if collection_state == "connect_failure":
+            if was_offline:
+                return False
+
+            LOGGER.warning(
+                "runtime monitor connect failed for container %s(%s), retrying once in the same round",
+                container_name,
+                container_id,
+            )
+            retry_state = _collect_container_runtime_inner(container_row)
+            if retry_state == "success":
+                mark_runtime_collect_success(container_id)
+                sync_container_full_user_access(container_id)
+                return True
+
             mark_runtime_collect_failure(container_id, container_name)
         return False
     finally:
         with _INFLIGHT_LOCK:
             _INFLIGHT_IDS.discard(container_id)
+
 
 def _collect_container_runtime_inner(container_row: dict) -> str:
     host = str(container_row["host"]).strip()
@@ -587,7 +279,7 @@ def _collect_container_runtime_inner(container_row: dict) -> str:
         )
         return "connect_failure"
 
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    timestamp = build_runtime_timestamp()
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -597,9 +289,9 @@ def _collect_container_runtime_inner(container_row: dict) -> str:
             port=ssh_port,
             username="root",
             password=root_password,
-            timeout=RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS,
-            banner_timeout=RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS,
-            auth_timeout=RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS,
+            timeout=SSH_CONNECT_TIMEOUT_SECONDS,
+            banner_timeout=SSH_CONNECT_TIMEOUT_SECONDS,
+            auth_timeout=SSH_CONNECT_TIMEOUT_SECONDS,
             look_for_keys=False,
             allow_agent=False,
         )

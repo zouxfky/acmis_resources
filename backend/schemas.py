@@ -33,7 +33,6 @@ class AdminUserCreatePayload(BaseModel):
     real_name: Optional[str] = Field(default=None, max_length=128)
     password: str = Field(min_length=8, max_length=128)
     role: str = Field(default="user")
-    status: str = Field(default="active")
     max_ssh_keys_per_user: int = Field(default=DEFAULT_MAX_SSH_KEYS_PER_USER, ge=1, le=100)
     max_join_keys_per_request: int = Field(default=DEFAULT_MAX_JOIN_KEYS_PER_REQUEST, ge=1, le=20)
     max_containers_per_user: int = Field(default=DEFAULT_MAX_CONTAINERS_PER_USER, ge=1, le=50)
@@ -43,7 +42,6 @@ class AdminUserUpdatePayload(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     real_name: Optional[str] = Field(default=None, max_length=128)
     role: str = Field(default="user")
-    status: str = Field(default="active")
     new_password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     max_ssh_keys_per_user: int = Field(default=DEFAULT_MAX_SSH_KEYS_PER_USER, ge=1, le=100)
     max_join_keys_per_request: int = Field(default=DEFAULT_MAX_JOIN_KEYS_PER_REQUEST, ge=1, le=20)
@@ -55,7 +53,7 @@ class AdminContainerCreatePayload(BaseModel):
     host: str = Field(min_length=1, max_length=255)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     root_password: Optional[str] = Field(default=None, max_length=255)
-    max_users: int = Field(default=5, ge=1, le=999)
+    max_users: int = Field(default=3, ge=1, le=999)
     status: str = Field(default="active")
 
 
@@ -64,5 +62,5 @@ class AdminContainerUpdatePayload(BaseModel):
     host: str = Field(min_length=1, max_length=255)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     root_password: Optional[str] = Field(default=None, max_length=255)
-    max_users: int = Field(default=5, ge=1, le=999)
+    max_users: int = Field(default=3, ge=1, le=999)
     status: str = Field(default="active")

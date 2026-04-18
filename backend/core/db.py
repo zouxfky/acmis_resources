@@ -1,6 +1,11 @@
 import sqlite3
 
-from backend.core.config import DB_PATH, SQLITE_BUSY_TIMEOUT_MS
+from backend.core.config import (
+    DB_PATH,
+    DEFAULT_LINUX_GID_BASE,
+    DEFAULT_LINUX_UID_BASE,
+    SQLITE_BUSY_TIMEOUT_MS,
+)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -17,6 +22,20 @@ def begin_immediate(connection: sqlite3.Connection) -> None:
     connection.execute("BEGIN IMMEDIATE")
 
 
+def allocate_next_linux_identity(connection: sqlite3.Connection) -> tuple[int, int]:
+    uid_row = connection.execute(
+        "SELECT COALESCE(MAX(linux_uid), ?) AS max_uid FROM users",
+        (DEFAULT_LINUX_UID_BASE - 1,),
+    ).fetchone()
+    gid_row = connection.execute(
+        "SELECT COALESCE(MAX(linux_gid), ?) AS max_gid FROM users",
+        (DEFAULT_LINUX_GID_BASE - 1,),
+    ).fetchone()
+    next_uid = max(DEFAULT_LINUX_UID_BASE, int(uid_row["max_uid"] or DEFAULT_LINUX_UID_BASE - 1) + 1)
+    next_gid = max(DEFAULT_LINUX_GID_BASE, int(gid_row["max_gid"] or DEFAULT_LINUX_GID_BASE - 1) + 1)
+    return next_uid, next_gid
+
+
 def init_db() -> None:
     from backend.features.runtime import create_runtime_schema_tables, upsert_container_runtime_system
     from backend.core.security import hash_password
@@ -30,10 +49,11 @@ def init_db() -> None:
                 real_name TEXT,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin', 'user')),
-                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'disabled')),
-                max_ssh_keys_per_user INTEGER NOT NULL DEFAULT 12,
-                max_join_keys_per_request INTEGER NOT NULL DEFAULT 5,
-                max_containers_per_user INTEGER NOT NULL DEFAULT 6
+                linux_uid INTEGER NOT NULL UNIQUE,
+                linux_gid INTEGER NOT NULL UNIQUE,
+                max_ssh_keys_per_user INTEGER NOT NULL DEFAULT 5,
+                max_join_keys_per_request INTEGER NOT NULL DEFAULT 3,
+                max_containers_per_user INTEGER NOT NULL DEFAULT 3
             )
             """
         )
@@ -45,7 +65,7 @@ def init_db() -> None:
                 host TEXT NOT NULL,
                 ssh_port INTEGER NOT NULL DEFAULT 22,
                 root_password TEXT NOT NULL DEFAULT '',
-                max_users INTEGER NOT NULL DEFAULT 5,
+                max_users INTEGER NOT NULL DEFAULT 3,
                 gpu_model TEXT NOT NULL DEFAULT '',
                 gpu_memory TEXT NOT NULL DEFAULT '',
                 gpu_count INTEGER NOT NULL DEFAULT 1,
@@ -89,17 +109,6 @@ def init_db() -> None:
         )
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS pending_container_user_syncs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                container_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(container_id, user_id)
-            )
-            """
-        )
-        connection.execute(
-            """
             CREATE TABLE IF NOT EXISTS user_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -135,6 +144,7 @@ def init_db() -> None:
         user_count_row = connection.execute("SELECT COUNT(1) AS count FROM users").fetchone()
         user_count = int(user_count_row["count"]) if user_count_row else 0
         if user_count == 0:
+            admin_linux_uid, admin_linux_gid = allocate_next_linux_identity(connection)
             connection.execute(
                 """
                 INSERT INTO users (
@@ -142,22 +152,24 @@ def init_db() -> None:
                     real_name,
                     password_hash,
                     role,
-                    status,
+                    linux_uid,
+                    linux_gid,
                     max_ssh_keys_per_user,
                     max_join_keys_per_request,
                     max_containers_per_user
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "admin",
                     "Admin",
                     hash_password("acmis@admin"),
                     "admin",
-                    "active",
-                    12,
+                    admin_linux_uid,
+                    admin_linux_gid,
                     5,
-                    6,
+                    3,
+                    3,
                 ),
             )
         connection.commit()

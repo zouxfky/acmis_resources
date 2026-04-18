@@ -7,7 +7,7 @@ export function AdminPage({
   adminContainersStatus,
   activeAdminSection,
   activeAdminSectionConfig,
-  adminActiveUserCount,
+  adminUserCount,
   adminActiveContainerCount,
   adminSectionCatalog,
   onSetActiveAdminSection,
@@ -22,9 +22,9 @@ export function AdminPage({
     <>
       <section className="overview-grid admin-overview-grid">
         <article className="overview-card accent-card">
-          <span>激活用户</span>
-          <strong>{adminActiveUserCount}</strong>
-          <p>当前系统内可用账户数量</p>
+          <span>用户总数</span>
+          <strong>{adminUserCount}</strong>
+          <p>当前系统内账户数量</p>
         </article>
 
         <article className="overview-card">
@@ -79,7 +79,6 @@ export function AdminPage({
                       <th>用户名</th>
                       <th>姓名</th>
                       <th>角色</th>
-                      <th>状态</th>
                       <th>密码</th>
                       <th>公钥数</th>
                       <th>授权数</th>
@@ -102,7 +101,6 @@ export function AdminPage({
                           <td>{userItem.username}</td>
                           <td>{userItem.real_name || "未设置姓名"}</td>
                           <td>{userItem.role}</td>
-                          <td>{userItem.status}</td>
                           <td>-</td>
                           <td>{userItem.ssh_key_count}</td>
                           <td>{userItem.access_count}</td>
@@ -124,7 +122,7 @@ export function AdminPage({
                       ))
                     ) : (
                       <tr>
-                        <td className="admin-table-empty" colSpan="8">暂无用户数据</td>
+                        <td className="admin-table-empty" colSpan="7">暂无用户数据</td>
                       </tr>
                     )}
                   </tbody>

@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 
-from backend.core.config import SSH_LOGIN_TIMEOUT_SECONDS
+from backend.core.config import SSH_CONNECT_TIMEOUT_SECONDS
 
 
 LINUX_USERNAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
@@ -86,9 +86,9 @@ def connect_ssh_root_client(host: str, port: int, password: str):
             port=port,
             username="root",
             password=normalized_password,
-            timeout=SSH_LOGIN_TIMEOUT_SECONDS,
-            banner_timeout=SSH_LOGIN_TIMEOUT_SECONDS,
-            auth_timeout=SSH_LOGIN_TIMEOUT_SECONDS,
+            timeout=SSH_CONNECT_TIMEOUT_SECONDS,
+            banner_timeout=SSH_CONNECT_TIMEOUT_SECONDS,
+            auth_timeout=SSH_CONNECT_TIMEOUT_SECONDS,
             look_for_keys=False,
             allow_agent=False,
         )
@@ -116,7 +116,7 @@ def inspect_ssh_container_hardware(host: str, port: int, password: str) -> dict:
     client = connect_ssh_root_client(normalized_host, port, normalized_password)
     try:
         def run(command: str, allowed_exit_codes: Optional[set[int]] = None) -> str:
-            stdin, stdout, stderr = client.exec_command(command, timeout=SSH_LOGIN_TIMEOUT_SECONDS)
+            stdin, stdout, stderr = client.exec_command(command, timeout=SSH_CONNECT_TIMEOUT_SECONDS)
             del stdin
             output = stdout.read().decode("utf-8", errors="replace")
             error_output = stderr.read().decode("utf-8", errors="replace").strip()
@@ -184,9 +184,10 @@ def serialize_user(user: sqlite3.Row) -> dict:
         "username": user["username"],
         "real_name": user["real_name"],
         "role": user["role"],
-        "status": user["status"],
     }
     for field_name in (
+        "linux_uid",
+        "linux_gid",
         "max_ssh_keys_per_user",
         "max_join_keys_per_request",
         "max_containers_per_user",
@@ -227,18 +228,6 @@ def validate_user_role(value: str) -> str:
             detail="用户角色必须是 admin 或 user",
         )
     return role
-
-
-def validate_user_status(value: str) -> str:
-    user_status = value.strip()
-    if user_status not in {"active", "disabled"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="用户状态必须是 active 或 disabled",
-        )
-    return user_status
-
-
 def validate_container_status(value: str) -> str:
     container_status = value.strip()
     if container_status not in {"active", "offline", "disabled"}:

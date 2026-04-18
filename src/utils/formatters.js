@@ -178,7 +178,6 @@ export function enrichWorkspaceContainer(container) {
     memoryUsageSummary: memoryUsageInfo.detailLabel,
     memoryUsageLabel: memoryUsageInfo.percentLabel,
     occupancy: `${container.active_user_count} / ${container.max_users}`,
-    joinedKeyIds: container.joined_key_ids || [],
-    syncPending: container.sync_pending === true
+    joinedKeyIds: container.joined_key_ids || []
   };
 }

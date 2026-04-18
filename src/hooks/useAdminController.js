@@ -10,7 +10,15 @@ import {
 } from "../api/client";
 import { emptyAdminContainerForm, emptyAdminUserForm } from "../app/constants";
 import { usePollingLeader } from "./usePollingLeader";
-
+import {
+  buildAdminContainerConfirmItems,
+  buildAdminContainerPayload,
+  buildAdminUserConfirmItems,
+  buildAdminUserPayload,
+  hasValidAdminUserQuota,
+  isAdminContainerPayloadChanged,
+  isAdminUserPayloadChanged
+} from "./adminControllerHelpers";
 
 export function useAdminController({
   session,
@@ -158,11 +166,10 @@ export function useAdminController({
       real_name: user.real_name || "",
       password: "",
       role: user.role,
-      status: user.status,
       new_password: "",
-      max_ssh_keys_per_user: String(user.max_ssh_keys_per_user ?? 12),
-      max_join_keys_per_request: String(user.max_join_keys_per_request ?? 5),
-      max_containers_per_user: String(user.max_containers_per_user ?? 6)
+      max_ssh_keys_per_user: String(user.max_ssh_keys_per_user ?? 5),
+      max_join_keys_per_request: String(user.max_join_keys_per_request ?? 3),
+      max_containers_per_user: String(user.max_containers_per_user ?? 3)
     });
     setAdminUsersStatus("idle");
     setAdminUsersMessage("");
@@ -214,34 +221,15 @@ export function useAdminController({
     setAdminContainerDialogOpen(false);
   }
 
-  function buildAdminUserPayload() {
-    const payload = {
-      username: adminUserForm.username.trim(),
-      real_name: adminUserForm.real_name.trim() || null,
-      role: adminUserForm.role || "user",
-      status: adminUserForm.status || "active",
-      max_ssh_keys_per_user: Number(adminUserForm.max_ssh_keys_per_user || 12),
-      max_join_keys_per_request: Number(adminUserForm.max_join_keys_per_request || 5),
-      max_containers_per_user: Number(adminUserForm.max_containers_per_user || 6)
-    };
-
-    if (!adminUserForm.id) {
-      payload.password = adminUserForm.password.trim();
-    } else if (adminUserForm.new_password.trim()) {
-      payload.new_password = adminUserForm.new_password.trim();
-    }
-
+  function getAdminUserPayload() {
+    const payload = buildAdminUserPayload(adminUserForm);
     if (!adminUserForm.id && !adminUserForm.password.trim()) {
       setAdminUsersStatus("error");
       setAdminUsersMessage("新建用户时必须设置密码");
       return null;
     }
 
-    if (
-      !Number.isInteger(payload.max_ssh_keys_per_user) ||
-      !Number.isInteger(payload.max_join_keys_per_request) ||
-      !Number.isInteger(payload.max_containers_per_user)
-    ) {
+    if (!hasValidAdminUserQuota(payload)) {
       setAdminUsersStatus("error");
       setAdminUsersMessage("请填写有效的用户配额");
       return null;
@@ -250,26 +238,9 @@ export function useAdminController({
     return payload;
   }
 
-  function isAdminUserPayloadChanged(originalUser, payload) {
-    if (!originalUser) {
-      return true;
-    }
-
-    return (
-      payload.username !== (originalUser.username || "") ||
-      (payload.real_name || null) !== (originalUser.real_name || null) ||
-      payload.role !== (originalUser.role || "user") ||
-      payload.status !== (originalUser.status || "active") ||
-      payload.max_ssh_keys_per_user !== Number(originalUser.max_ssh_keys_per_user ?? 12) ||
-      payload.max_join_keys_per_request !== Number(originalUser.max_join_keys_per_request ?? 5) ||
-      payload.max_containers_per_user !== Number(originalUser.max_containers_per_user ?? 6) ||
-      Boolean(payload.new_password)
-    );
-  }
-
   function handleAdminUserSubmit(event) {
     event?.preventDefault();
-    const payload = buildAdminUserPayload();
+    const payload = getAdminUserPayload();
 
     if (!payload) {
       return;
@@ -291,17 +262,7 @@ export function useAdminController({
       copy: adminUserForm.id ? "确认后会保存这名用户的最新信息" : "确认后会创建这名用户账户",
       userId: adminUserForm.id,
       payload,
-      keyItems: [
-        { id: "username", label: "用户名", value: payload.username },
-        { id: "real_name", label: "姓名", value: payload.real_name || "-" },
-        { id: "role", label: "角色", value: payload.role },
-        { id: "status", label: "状态", value: payload.status },
-        {
-          id: "password",
-          label: "密码",
-          value: adminUserForm.id ? (payload.new_password ? "将重置" : "保持不变") : "已设置"
-        }
-      ]
+      keyItems: buildAdminUserConfirmItems(adminUserForm, payload)
     });
   }
 
@@ -319,7 +280,6 @@ export function useAdminController({
       setAdminUserForm({ ...emptyAdminUserForm });
       setSelectedAdminUserId(null);
       setAdminUserDialogOpen(false);
-      await loadAdminData();
     } catch (error) {
       setAdminUsersStatus("error");
       setAdminUsersMessage("");
@@ -336,8 +296,7 @@ export function useAdminController({
       keyItems: [
         { id: "username", label: "用户名", value: userItem.username },
         { id: "real_name", label: "姓名", value: userItem.real_name || "-" },
-        { id: "role", label: "角色", value: userItem.role },
-        { id: "status", label: "状态", value: userItem.status }
+        { id: "role", label: "角色", value: userItem.role }
       ]
     });
   }
@@ -360,7 +319,6 @@ export function useAdminController({
       if (selectedAdminUserId === userId) {
         setSelectedAdminUserId(null);
       }
-      await loadAdminData();
     } catch (error) {
       setAdminUsersStatus("error");
       setAdminUsersMessage("");
@@ -368,35 +326,9 @@ export function useAdminController({
     }
   }
 
-  function buildAdminContainerPayload() {
-    return {
-      name: adminContainerForm.name.trim(),
-      host: adminContainerForm.host.trim(),
-      ssh_port: Number(adminContainerForm.ssh_port || 22),
-      root_password: adminContainerForm.root_password.trim() || null,
-      max_users: Number(adminContainerForm.max_users || 5),
-      status: adminContainerForm.status || "active"
-    };
-  }
-
-  function isAdminContainerPayloadChanged(originalContainer, payload) {
-    if (!originalContainer) {
-      return true;
-    }
-
-    return (
-      payload.name !== (originalContainer.name || "") ||
-      payload.host !== (originalContainer.host || "") ||
-      payload.ssh_port !== Number(originalContainer.ssh_port ?? 22) ||
-      Boolean(payload.root_password) ||
-      payload.max_users !== Number(originalContainer.max_users ?? 5) ||
-      payload.status !== (originalContainer.status || "active")
-    );
-  }
-
   function handleAdminContainerSubmit(event) {
     event?.preventDefault();
-    const payload = buildAdminContainerPayload();
+    const payload = buildAdminContainerPayload(adminContainerForm);
 
     if (adminContainerForm.id) {
       const originalContainer = adminContainers.find((item) => item.id === adminContainerForm.id);
@@ -414,20 +346,7 @@ export function useAdminController({
       copy: adminContainerForm.id ? "确认后会保存这台服务器的最新信息" : "确认后会创建这台服务器记录",
       containerId: adminContainerForm.id,
       payload,
-      keyItems: [
-        { id: "name", label: "名称", value: payload.name || "-" },
-        { id: "host", label: "主机", value: payload.host || "-" },
-        { id: "gpu", label: "GPU", value: payload.gpu_model || "-" },
-        {
-          id: "root_password",
-          label: "Root密码",
-          value: adminContainerForm.id
-            ? (payload.root_password ? "将更新" : "保持不变")
-            : (payload.root_password ? "已设置" : "未设置")
-        },
-        { id: "status", label: "状态", value: payload.status },
-        { id: "max_users", label: "最大人数", value: String(payload.max_users) }
-      ]
+      keyItems: buildAdminContainerConfirmItems(adminContainerForm, payload)
     });
   }
 
@@ -445,7 +364,6 @@ export function useAdminController({
       setAdminContainerForm({ ...emptyAdminContainerForm });
       setSelectedAdminContainerId(null);
       setAdminContainerDialogOpen(false);
-      await loadAdminData();
     } catch (error) {
       setAdminContainersStatus("error");
       setAdminContainersMessage("");
@@ -486,7 +404,6 @@ export function useAdminController({
       if (selectedAdminContainerId === containerId) {
         setSelectedAdminContainerId(null);
       }
-      await loadAdminData();
     } catch (error) {
       setAdminContainersStatus("error");
       setAdminContainersMessage("");

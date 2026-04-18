@@ -8,62 +8,17 @@ import {
   leaveContainerRequest
 } from "../api/client";
 import { usePollingLeader } from "./usePollingLeader";
-import { areIdSetsEqual, enrichWorkspaceContainer } from "../utils/formatters";
-
-const CONTAINER_ACTION_COOLDOWN_MS = 5 * 60 * 1000;
-
-function buildContainerCooldownStorageKey(userId) {
-  return `acmis:workspace-container-cooldowns:${userId}`;
-}
-
-function pruneCooldownEntries(cooldowns, now = Date.now()) {
-  return Object.fromEntries(
-    Object.entries(cooldowns || {}).filter(([, expiresAt]) => Number(expiresAt) > now)
-  );
-}
-
-function readContainerCooldowns(userId) {
-  if (!userId || typeof window === "undefined") {
-    return {};
-  }
-
-  try {
-    const stored = window.localStorage.getItem(buildContainerCooldownStorageKey(userId));
-    if (!stored) {
-      return {};
-    }
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object") {
-      return {};
-    }
-    return pruneCooldownEntries(parsed);
-  } catch {
-    return {};
-  }
-}
-
-function writeContainerCooldowns(userId, cooldowns) {
-  if (!userId || typeof window === "undefined") {
-    return;
-  }
-
-  const nextCooldowns = pruneCooldownEntries(cooldowns);
-  const storageKey = buildContainerCooldownStorageKey(userId);
-
-  if (Object.keys(nextCooldowns).length === 0) {
-    window.localStorage.removeItem(storageKey);
-    return;
-  }
-
-  window.localStorage.setItem(storageKey, JSON.stringify(nextCooldowns));
-}
-
-function formatCooldownLabel(remainingMs) {
-  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
+import { areIdSetsEqual } from "../utils/formatters";
+import {
+  decorateWorkspaceContainers,
+  formatCooldownLabel,
+  getCooldownExpiryTimestamp,
+  mapWorkspaceContainers,
+  mapWorkspaceSshKeys,
+  pruneCooldownEntries,
+  readContainerCooldowns,
+  writeContainerCooldowns
+} from "./workspaceControllerHelpers";
 
 
 export function useWorkspaceController({
@@ -124,17 +79,11 @@ export function useWorkspaceController({
   }
 
   function applyWorkspaceSshKeys(sshKeyItems) {
-    const nextSshKeys = (sshKeyItems || []).map((item) => ({
-      id: item.id,
-      label: item.key_name,
-      value: item.public_key,
-      fingerprint: item.fingerprint
-    }));
-    setSshKeys(nextSshKeys);
+    setSshKeys(mapWorkspaceSshKeys(sshKeyItems));
   }
 
   function replaceWorkspaceContainers(containerItems) {
-    setWorkspaceContainers((containerItems || []).map(enrichWorkspaceContainer));
+    setWorkspaceContainers(mapWorkspaceContainers(containerItems));
   }
 
   function applyWorkspaceData(workspace) {
@@ -143,7 +92,7 @@ export function useWorkspaceController({
   }
 
   function applyWorkspaceContainerPatch(containerItems) {
-    const nextContainers = (containerItems || []).map(enrichWorkspaceContainer);
+    const nextContainers = mapWorkspaceContainers(containerItems);
     if (nextContainers.length === 0) {
       return;
     }
@@ -170,8 +119,9 @@ export function useWorkspaceController({
   }
 
   function startContainerActionCooldown(containerId) {
-    const expiresAt = Date.now() + CONTAINER_ACTION_COOLDOWN_MS;
-    setCooldownNow(Date.now());
+    const now = Date.now();
+    const expiresAt = getCooldownExpiryTimestamp(now);
+    setCooldownNow(now);
     setContainerActionCooldowns((current) => ({
       ...pruneCooldownEntries(current),
       [String(containerId)]: expiresAt
@@ -448,11 +398,7 @@ export function useWorkspaceController({
       setJoinDialogSelection([]);
       setJoinDialogMessage("");
       setWorkspaceMessage("");
-      if (data.sync_pending) {
-        showFloatingTip("加入已保存，容器同步待重试", "error");
-      } else {
-        showFloatingTip("加入容器成功");
-      }
+      showFloatingTip("加入容器成功");
     } catch (error) {
       setJoinDialogMessage("");
       showFloatingTip(error instanceof Error ? error.message : "容器加入失败", "error");
@@ -507,15 +453,11 @@ export function useWorkspaceController({
     }
   }
 
-  const decoratedWorkspaceContainers = workspaceContainers.map((item) => {
-    const actionCooldownRemainingMs = getContainerActionCooldownRemainingMs(item.id);
-    return {
-      ...item,
-      actionCooldownActive: actionCooldownRemainingMs > 0,
-      actionCooldownRemainingMs,
-      actionCooldownLabel: actionCooldownRemainingMs > 0 ? formatCooldownLabel(actionCooldownRemainingMs) : ""
-    };
-  });
+  const decoratedWorkspaceContainers = decorateWorkspaceContainers(
+    workspaceContainers,
+    containerActionCooldowns,
+    cooldownNow
+  );
   const joinedContainers = decoratedWorkspaceContainers.filter((item) => item.joinedKeyIds.length > 0);
   const joinDialogContainer = workspaceContainers.find((item) => item.id === joinDialogContainerId) || null;
   const joinDialogAvailableKeys = joinDialogContainer

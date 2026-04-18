@@ -27,7 +27,7 @@ export default function App() {
 
   const accountDisplayName = controller.session.real_name || controller.session.username;
   const isAdmin = controller.session.role === "admin";
-  const adminActiveUserCount = controller.adminUsers.filter((item) => item.status === "active").length;
+  const adminUserCount = controller.adminUsers.length;
   const adminActiveContainerCount = controller.adminContainers.filter((item) => item.status === "active").length;
   const activeAdminSectionConfig =
     adminSectionCatalog.find((item) => item.id === controller.activeAdminSection) || adminSectionCatalog[0];
@@ -111,7 +111,7 @@ export default function App() {
             adminContainersStatus={controller.adminContainersStatus}
             activeAdminSection={controller.activeAdminSection}
             activeAdminSectionConfig={activeAdminSectionConfig}
-            adminActiveUserCount={adminActiveUserCount}
+            adminUserCount={adminUserCount}
             adminActiveContainerCount={adminActiveContainerCount}
             adminSectionCatalog={adminSectionCatalog}
             onSetActiveAdminSection={controller.setActiveAdminSection}

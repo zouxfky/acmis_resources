@@ -290,7 +290,6 @@ def get_current_user(request: Request) -> Optional[sqlite3.Row]:
                 u.real_name,
                 u.password_hash,
                 u.role,
-                u.status,
                 u.max_ssh_keys_per_user,
                 u.max_join_keys_per_request,
                 u.max_containers_per_user
@@ -302,7 +301,7 @@ def get_current_user(request: Request) -> Optional[sqlite3.Row]:
         ).fetchone()
         if not session:
             return None
-        if session["status"] != "active" or int(session["expires_at"]) < int(time.time()):
+        if int(session["expires_at"]) < int(time.time()):
             connection.execute("DELETE FROM user_sessions WHERE id = ?", (session["session_id"],))
             connection.commit()
             return None
