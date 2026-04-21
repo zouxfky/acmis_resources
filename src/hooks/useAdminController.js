@@ -375,7 +375,7 @@ export function useAdminController({
     setConfirmDialog({
       type: "admin-container-delete",
       title: `确认删除服务器 ${containerItem.name}`,
-      copy: "确认后会删除这台服务器及其相关授权关系",
+      copy: "确认后会先清理这台服务器内的 SSH 授权，再删除服务器记录",
       containerId: containerItem.id,
       keyItems: [
         { id: "name", label: "名称", value: containerItem.name },

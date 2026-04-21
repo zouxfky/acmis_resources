@@ -40,6 +40,7 @@ def build_container_user_sync_payload(
     container_id: int,
     user_id: int,
     public_keys_override: Optional[list[str]] = None,
+    allow_inactive: bool = False,
 ) -> ContainerUserSyncPayload:
     user_row = connection.execute(
         """
@@ -62,7 +63,7 @@ def build_container_user_sync_payload(
     ).fetchone()
     if not container_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="容器不存在")
-    if container_row["status"] != "active":
+    if not allow_inactive and container_row["status"] != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前容器不可同步 SSH 授权")
 
     if public_keys_override is None:
@@ -100,9 +101,18 @@ def build_container_user_sync_payload(
     )
 
 
-def fetch_container_user_sync_payload(container_id: int, user_id: int) -> ContainerUserSyncPayload:
+def fetch_container_user_sync_payload(
+    container_id: int,
+    user_id: int,
+    allow_inactive: bool = False,
+) -> ContainerUserSyncPayload:
     with get_connection() as connection:
-        return build_container_user_sync_payload(connection, container_id, user_id)
+        return build_container_user_sync_payload(
+            connection,
+            container_id,
+            user_id,
+            allow_inactive=allow_inactive,
+        )
 
 
 def mark_container_offline(container_id: int) -> None:
@@ -119,7 +129,11 @@ def mark_container_offline(container_id: int) -> None:
         connection.commit()
 
 
-def ensure_container_ssh_available(container_id: int, retry_attempts: int = 2) -> None:
+def ensure_container_ssh_available(
+    container_id: int,
+    retry_attempts: int = 2,
+    allow_inactive: bool = False,
+) -> None:
     with get_connection() as connection:
         container_row = connection.execute(
             """
@@ -131,7 +145,7 @@ def ensure_container_ssh_available(container_id: int, retry_attempts: int = 2) -
         ).fetchone()
     if not container_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="容器不存在")
-    if container_row["status"] != "active":
+    if not allow_inactive and container_row["status"] != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前容器不可连接")
 
     host = str(container_row["host"] or "").strip()
@@ -161,8 +175,9 @@ def sync_container_user_authorized_keys(
     container_id: int,
     user_id: int,
     public_keys_override: Optional[list[str]] = None,
+    allow_inactive: bool = False,
 ) -> None:
-    payload = fetch_container_user_sync_payload(container_id, user_id)
+    payload = fetch_container_user_sync_payload(container_id, user_id, allow_inactive=allow_inactive)
     public_keys = payload.public_keys if public_keys_override is None else normalize_public_keys(public_keys_override)
     sync_container_user_authorized_keys_payload(payload, public_keys)
 

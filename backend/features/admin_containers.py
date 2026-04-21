@@ -2,7 +2,7 @@ import sqlite3
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from backend.core.db import get_connection
+from backend.core.db import begin_immediate, get_connection
 from backend.core.helpers import (
     inspect_ssh_container_hardware,
     normalize_optional_text,
@@ -10,6 +10,12 @@ from backend.core.helpers import (
 )
 from backend.core.security import require_admin_user
 from backend.features.admin_shared import fetch_admin_container_detail, fetch_admin_containers
+from backend.features.container_ssh_access import (
+    acquire_container_user_sync_locks,
+    ensure_container_ssh_available,
+    fetch_container_joined_user_ids,
+    sync_container_user_authorized_keys,
+)
 from backend.features.runtime import (
     fetch_container_runtime_payload,
     upsert_container_runtime_system,
@@ -19,6 +25,40 @@ from backend.schemas import AdminContainerCreatePayload, AdminContainerUpdatePay
 
 
 router = APIRouter()
+
+
+def _mark_container_disabled_for_delete(container_id: int) -> str:
+    with get_connection() as connection:
+        begin_immediate(connection)
+        container_row = connection.execute(
+            """
+            SELECT id, status
+            FROM containers
+            WHERE id = ?
+            """,
+            (container_id,),
+        ).fetchone()
+        if not container_row:
+            connection.rollback()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="服务器不存在")
+
+        original_status = str(container_row["status"])
+        if original_status != "disabled":
+            connection.execute("UPDATE containers SET status = 'disabled' WHERE id = ?", (container_id,))
+        connection.commit()
+    return original_status
+
+
+def _restore_container_status(container_id: int, container_status: str) -> None:
+    with get_connection() as connection:
+        begin_immediate(connection)
+        container_row = connection.execute("SELECT id FROM containers WHERE id = ?", (container_id,)).fetchone()
+        if not container_row:
+            connection.rollback()
+            return
+
+        connection.execute("UPDATE containers SET status = ? WHERE id = ?", (container_status, container_id))
+        connection.commit()
 
 
 @router.get("/api/admin/containers")
@@ -165,15 +205,37 @@ def update_admin_container(container_id: int, payload: AdminContainerUpdatePaylo
 def delete_admin_container(container_id: int, request: Request) -> dict:
     require_admin_user(request, require_csrf=True)
 
-    with get_connection() as connection:
-        existing = connection.execute("SELECT id FROM containers WHERE id = ?", (container_id,)).fetchone()
-        if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="服务器不存在")
+    original_status = _mark_container_disabled_for_delete(container_id)
+    joined_user_ids = fetch_container_joined_user_ids(container_id)
+    lock_items = [(container_id, user_id) for user_id in joined_user_ids]
 
-        connection.execute("DELETE FROM ssh_key_container_bindings WHERE container_id = ?", (container_id,))
-        connection.execute("DELETE FROM container_runtime_processes WHERE container_id = ?", (container_id,))
-        connection.execute("DELETE FROM container_runtime_gpus WHERE container_id = ?", (container_id,))
-        connection.execute("DELETE FROM container_runtime_system WHERE container_id = ?", (container_id,))
-        connection.execute("DELETE FROM containers WHERE id = ?", (container_id,))
-        connection.commit()
+    try:
+        with acquire_container_user_sync_locks(lock_items):
+            if joined_user_ids:
+                ensure_container_ssh_available(container_id, allow_inactive=True)
+                for user_id in joined_user_ids:
+                    sync_container_user_authorized_keys(
+                        container_id,
+                        user_id,
+                        public_keys_override=[],
+                        allow_inactive=True,
+                    )
+
+            with get_connection() as connection:
+                begin_immediate(connection)
+                existing = connection.execute("SELECT id FROM containers WHERE id = ?", (container_id,)).fetchone()
+                if not existing:
+                    connection.rollback()
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="服务器不存在")
+
+                connection.execute("DELETE FROM ssh_key_container_bindings WHERE container_id = ?", (container_id,))
+                connection.execute("DELETE FROM container_runtime_processes WHERE container_id = ?", (container_id,))
+                connection.execute("DELETE FROM container_runtime_gpus WHERE container_id = ?", (container_id,))
+                connection.execute("DELETE FROM container_runtime_system WHERE container_id = ?", (container_id,))
+                connection.execute("DELETE FROM containers WHERE id = ?", (container_id,))
+                connection.commit()
+    except Exception:
+        _restore_container_status(container_id, original_status)
+        raise
+
     return {"ok": True, "message": "服务器已删除"}
