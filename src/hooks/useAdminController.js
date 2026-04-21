@@ -168,8 +168,8 @@ export function useAdminController({
       role: user.role,
       new_password: "",
       max_ssh_keys_per_user: String(user.max_ssh_keys_per_user ?? 5),
-      max_join_keys_per_request: String(user.max_join_keys_per_request ?? 3),
-      max_containers_per_user: String(user.max_containers_per_user ?? 3)
+      max_join_keys_per_request: String(user.max_join_keys_per_request ?? 5),
+      max_containers_per_user: String(user.max_containers_per_user ?? 4)
     });
     setAdminUsersStatus("idle");
     setAdminUsersMessage("");

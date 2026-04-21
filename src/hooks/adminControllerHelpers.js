@@ -4,8 +4,8 @@ export function buildAdminUserPayload(form) {
     real_name: form.real_name.trim() || null,
     role: form.role || "user",
     max_ssh_keys_per_user: Number(form.max_ssh_keys_per_user || 5),
-    max_join_keys_per_request: Number(form.max_join_keys_per_request || 3),
-    max_containers_per_user: Number(form.max_containers_per_user || 3)
+    max_join_keys_per_request: Number(form.max_join_keys_per_request || 5),
+    max_containers_per_user: Number(form.max_containers_per_user || 4)
   };
 
   if (!form.id) {
@@ -35,8 +35,8 @@ export function isAdminUserPayloadChanged(originalUser, payload) {
     (payload.real_name || null) !== (originalUser.real_name || null) ||
     payload.role !== (originalUser.role || "user") ||
     payload.max_ssh_keys_per_user !== Number(originalUser.max_ssh_keys_per_user ?? 5) ||
-    payload.max_join_keys_per_request !== Number(originalUser.max_join_keys_per_request ?? 3) ||
-    payload.max_containers_per_user !== Number(originalUser.max_containers_per_user ?? 3) ||
+    payload.max_join_keys_per_request !== Number(originalUser.max_join_keys_per_request ?? 5) ||
+    payload.max_containers_per_user !== Number(originalUser.max_containers_per_user ?? 4) ||
     Boolean(payload.new_password)
   );
 }

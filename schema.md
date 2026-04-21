@@ -21,8 +21,8 @@ CREATE TABLE users (
     linux_uid INT NOT NULL UNIQUE,
     linux_gid INT NOT NULL UNIQUE,
     max_ssh_keys_per_user INT NOT NULL DEFAULT 5,
-    max_join_keys_per_request INT NOT NULL DEFAULT 3,
-    max_containers_per_user INT NOT NULL DEFAULT 3
+    max_join_keys_per_request INT NOT NULL DEFAULT 5,
+    max_containers_per_user INT NOT NULL DEFAULT 4
 );
 ```
 

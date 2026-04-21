@@ -52,8 +52,8 @@ def init_db() -> None:
                 linux_uid INTEGER NOT NULL UNIQUE,
                 linux_gid INTEGER NOT NULL UNIQUE,
                 max_ssh_keys_per_user INTEGER NOT NULL DEFAULT 5,
-                max_join_keys_per_request INTEGER NOT NULL DEFAULT 3,
-                max_containers_per_user INTEGER NOT NULL DEFAULT 3
+                max_join_keys_per_request INTEGER NOT NULL DEFAULT 5,
+                max_containers_per_user INTEGER NOT NULL DEFAULT 4
             )
             """
         )
@@ -168,8 +168,8 @@ def init_db() -> None:
                     admin_linux_uid,
                     admin_linux_gid,
                     5,
-                    3,
-                    3,
+                    5,
+                    4,
                 ),
             )
         connection.commit()
