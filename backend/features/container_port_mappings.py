@@ -1,5 +1,5 @@
 import sqlite3
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException, status
 
@@ -78,7 +78,7 @@ def normalize_container_port_mappings(port_mappings: list[Any]) -> list[dict]:
 def ensure_public_ports_available(
     connection: sqlite3.Connection,
     port_mappings: list[dict],
-    container_id: int | None = None,
+    container_id: Optional[int] = None,
 ) -> None:
     if not port_mappings:
         return
@@ -137,7 +137,7 @@ def replace_container_port_mappings(
 
 def fetch_container_port_mapping_map(
     connection: sqlite3.Connection,
-    container_ids: list[int] | None = None,
+    container_ids: Optional[list[int]] = None,
 ) -> dict[int, list[dict]]:
     sql = """
         SELECT container_id, slot_index, public_port, container_port
