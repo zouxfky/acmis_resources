@@ -169,7 +169,7 @@ export function WorkspaceContainerCard({
           </div>
 
           <div className="container-runtime-block">
-            <span className="container-runtime-label">GPU 占用进程</span>
+            <span className="container-runtime-label">疑似 GPU 占用进程</span>
             {container.processRuntimeAvailable && container.runtimeProcesses.length > 0 ? (
               <>
                 <div className="container-process-chip-list">
@@ -208,7 +208,7 @@ export function WorkspaceContainerCard({
             ) : !container.processRuntimeAvailable ? (
               <p className="container-runtime-empty">当前暂无数据</p>
             ) : (
-              <p className="container-runtime-empty">当前暂无 GPU 占用进程</p>
+              <p className="container-runtime-empty">当前暂无疑似 GPU 占用进程</p>
             )}
           </div>
         </div>

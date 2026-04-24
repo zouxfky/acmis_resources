@@ -21,21 +21,21 @@ from backend.features.container_ssh_access import (
 from backend.features.runtime_collectors import (
     CPU_COMMAND,
     GPU_COMMAND,
-    LSOF_COMMAND,
     MEMORY_COMMAND,
+    build_authorized_user_process_command,
     build_empty_system_payload,
-    build_ps_command,
+    build_process_rows,
     build_runtime_timestamp,
     exec_ssh_command,
+    fetch_container_joined_user_map,
     fetch_runtime_container_row,
     fetch_runtime_container_rows,
-    fetch_user_id_map,
-    merge_process_rows,
+    filter_suspected_gpu_processes,
     parse_gpu_output,
-    parse_lsof_output,
-    parse_ps_output,
+    parse_process_scan_output,
     parse_system_output,
     save_runtime_snapshot,
+    should_run_process_scan,
 )
 
 try:
@@ -183,8 +183,12 @@ class RuntimeMonitorService:
         if not container_rows:
             return
 
+        joined_user_map = fetch_container_joined_user_map([int(row["id"]) for row in container_rows])
         executor = ThreadPoolExecutor(max_workers=max(1, RUNTIME_MONITOR_MAX_WORKERS))
-        future_map = {executor.submit(self._collect_container, row): row for row in container_rows}
+        future_map = {
+            executor.submit(self._collect_container, row, joined_user_map.get(int(row["id"]), [])): row
+            for row in container_rows
+        }
         try:
             done, not_done = wait(
                 future_map.keys(),
@@ -213,8 +217,8 @@ class RuntimeMonitorService:
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
-    def _collect_container(self, container_row: dict) -> None:
-        collect_container_runtime_row(container_row)
+    def _collect_container(self, container_row: dict, joined_users: list[dict]) -> None:
+        collect_container_runtime_row(container_row, joined_users)
 
 
 def collect_container_runtime_now(container_id: int) -> bool:
@@ -223,20 +227,24 @@ def collect_container_runtime_now(container_id: int) -> bool:
     container_row = fetch_runtime_container_row(container_id)
     if not container_row or container_row.get("status") not in {"active", "offline"}:
         return False
-    return collect_container_runtime_row(container_row)
+    joined_user_map = fetch_container_joined_user_map([container_id])
+    return collect_container_runtime_row(container_row, joined_user_map.get(container_id, []))
 
 
-def collect_container_runtime_row(container_row: dict) -> bool:
+def collect_container_runtime_row(container_row: dict, joined_users: Optional[list[dict]] = None) -> bool:
     container_id = int(container_row["id"])
     container_name = str(container_row["name"])
     was_offline = str(container_row.get("status")) == "offline"
+    if joined_users is None:
+        joined_user_map = fetch_container_joined_user_map([container_id])
+        joined_users = joined_user_map.get(container_id, [])
     with _INFLIGHT_LOCK:
         if container_id in _INFLIGHT_IDS:
             return False
         _INFLIGHT_IDS.add(container_id)
 
     try:
-        collection_state = _collect_container_runtime_inner(container_row)
+        collection_state = _collect_container_runtime_inner(container_row, joined_users)
         if collection_state == "success":
             mark_runtime_collect_success(container_id)
             if was_offline:
@@ -251,7 +259,7 @@ def collect_container_runtime_row(container_row: dict) -> bool:
                 container_name,
                 container_id,
             )
-            retry_state = _collect_container_runtime_inner(container_row)
+            retry_state = _collect_container_runtime_inner(container_row, joined_users)
             if retry_state == "success":
                 mark_runtime_collect_success(container_id)
                 sync_container_full_user_access(container_id)
@@ -264,7 +272,7 @@ def collect_container_runtime_row(container_row: dict) -> bool:
             _INFLIGHT_IDS.discard(container_id)
 
 
-def _collect_container_runtime_inner(container_row: dict) -> str:
+def _collect_container_runtime_inner(container_row: dict, joined_users: list[dict]) -> str:
     host = str(container_row["host"]).strip()
     ssh_port = int(container_row["ssh_port"])
     root_password = str(container_row["root_password"] or "").strip()
@@ -324,23 +332,25 @@ def _collect_container_runtime_inner(container_row: dict) -> str:
             parsed_system_payload = parse_system_output(cpu_output or "", memory_output or "")
             system_payload.update(parsed_system_payload)
 
-        try:
-            lsof_output = exec_ssh_command(
-                client,
-                LSOF_COMMAND,
-                RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS,
-                allowed_exit_codes={0, 1},
-            )
-            lsof_rows = parse_lsof_output(lsof_output)
-            ps_output = ""
-            ps_command = build_ps_command(lsof_rows)
-            if ps_command:
-                ps_output = exec_ssh_command(client, ps_command, RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS)
-            user_id_map = fetch_user_id_map()
-            process_rows = merge_process_rows(lsof_rows, parse_ps_output(ps_output), timestamp, user_id_map)
-            system_payload["processes_available"] = True
-        except Exception as exc:
-            _log_runtime_component_failure("process", container_name, container_id, exc)
+        if system_payload["gpu_available"]:
+            try:
+                if should_run_process_scan(joined_users, gpu_rows):
+                    process_command = build_authorized_user_process_command(
+                        [str(item.get("username") or "").strip() for item in joined_users]
+                    )
+                    if process_command:
+                        process_output = exec_ssh_command(
+                            client,
+                            process_command,
+                            RUNTIME_SSH_COMMAND_TIMEOUT_SECONDS,
+                            allowed_exit_codes={0, 1},
+                        )
+                        process_items = parse_process_scan_output(process_output)
+                        filtered_process_items = filter_suspected_gpu_processes(process_items)
+                        process_rows = build_process_rows(filtered_process_items, joined_users, timestamp)
+                system_payload["processes_available"] = True
+            except Exception as exc:
+                _log_runtime_component_failure("process", container_name, container_id, exc)
 
         save_runtime_snapshot(container_id, system_payload, gpu_rows, process_rows, timestamp)
         return "success"

@@ -1,3 +1,4 @@
+import os
 import re
 import time
 from typing import Any, Optional
@@ -16,7 +17,25 @@ GPU_COMMAND = (
 )
 CPU_COMMAND = "top -bn1 | head -n 5"
 MEMORY_COMMAND = "free -b | awk 'NR==2 {print $2, $3}'"
-LSOF_COMMAND = r"lsof /dev/nvidia* 2>/dev/null | awk 'NR>1 {print $1, $2, $3}' | sort -u"
+PROCESS_SCAN_BASE_COMMAND = "ps -eww -o pid=,user=,args="
+SAFE_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+PYTHON_INTERPRETER_PATTERN = re.compile(r"^python(?:\d+(?:\.\d+)*)?$")
+TASK_TOKEN_PATTERN = re.compile(r"(^|\s)(train|serve|infer|eval)(\s|$)")
+MODULE_MARKER_PATTERN = re.compile(r"(^|\s)-m(\s|$)")
+TASK_KEYWORDS = (
+    "accelerate",
+    "api_server",
+    "deepspeed",
+    "generate",
+    "inference",
+    "jupyter",
+    "lmdeploy",
+    "sglang",
+    "tensorboard",
+    "tritonserver",
+    "torchrun",
+    "vllm",
+)
 
 
 def mib_to_g(value: float) -> float:
@@ -85,43 +104,9 @@ def parse_system_output(cpu_output: str, memory_output: str) -> dict:
     }
 
 
-def parse_lsof_output(output: str) -> list[dict]:
-    items: list[dict] = []
+def parse_process_scan_output(output: str) -> list[dict]:
+    process_items: list[dict] = []
     seen_pids: set[int] = set()
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 2)
-        if len(parts) < 3:
-            continue
-        command_name, pid_text, linux_username = parts
-        try:
-            pid = int(pid_text)
-        except ValueError:
-            continue
-        if pid in seen_pids:
-            continue
-        seen_pids.add(pid)
-        items.append(
-            {
-                "command_name": command_name,
-                "pid": pid,
-                "linux_username": linux_username.strip(),
-            }
-        )
-    return items
-
-
-def build_ps_command(pid_items: list[dict]) -> Optional[str]:
-    if not pid_items:
-        return None
-    pid_list = ",".join(str(item["pid"]) for item in pid_items)
-    return f"ps -p {pid_list} -o pid=,user=,args="
-
-
-def parse_ps_output(output: str) -> dict[int, dict]:
-    process_map: dict[int, dict] = {}
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line:
@@ -133,35 +118,17 @@ def parse_ps_output(output: str) -> dict[int, dict]:
             pid = int(parts[0])
         except ValueError:
             continue
-        process_map[pid] = {
-            "pid": pid,
-            "linux_username": parts[1].strip(),
-            "process_name": parts[2].strip(),
-        }
-    return process_map
-
-
-def merge_process_rows(
-    lsof_rows: list[dict],
-    ps_map: dict[int, dict],
-    timestamp: str,
-    user_id_map: dict[str, int],
-) -> list[dict]:
-    process_rows: list[dict] = []
-    for item in lsof_rows:
-        process_detail = ps_map.get(item["pid"], {})
-        linux_username = process_detail.get("linux_username") or item["linux_username"]
-        process_name = process_detail.get("process_name") or item["command_name"]
-        process_rows.append(
+        if pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        process_items.append(
             {
-                "user_id": user_id_map.get(linux_username),
-                "linux_username": linux_username,
-                "pid": item["pid"],
-                "process_name": process_name,
-                "updated_at": timestamp,
+                "pid": pid,
+                "linux_username": parts[1].strip(),
+                "process_name": parts[2].strip(),
             }
         )
-    return process_rows
+    return process_items
 
 
 def fetch_runtime_container_rows() -> list[dict]:
@@ -190,16 +157,131 @@ def fetch_runtime_container_row(container_id: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def fetch_user_id_map() -> dict[str, int]:
+def fetch_container_joined_user_map(container_ids: list[int]) -> dict[int, list[dict]]:
+    if not container_ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in container_ids)
     with get_connection() as connection:
         rows = connection.execute(
-            """
-            SELECT id, username
-            FROM users
-            ORDER BY id ASC
-            """
+            f"""
+            SELECT DISTINCT scb.container_id, u.id AS user_id, u.username
+            FROM ssh_key_container_bindings scb
+            JOIN user_ssh_key_bindings ub ON ub.ssh_key_id = scb.ssh_key_id
+            JOIN users u ON u.id = ub.user_id
+            WHERE scb.container_id IN ({placeholders})
+            ORDER BY scb.container_id ASC, u.id ASC
+            """,
+            container_ids,
         ).fetchall()
-    return {str(row["username"]): int(row["id"]) for row in rows}
+
+    joined_user_map: dict[int, list[dict]] = {}
+    for row in rows:
+        username = str(row["username"] or "").strip()
+        if not username:
+            continue
+        joined_user_map.setdefault(int(row["container_id"]), []).append(
+            {
+                "user_id": int(row["user_id"]),
+                "username": username,
+            }
+        )
+    return joined_user_map
+
+
+def should_run_process_scan(joined_users: list[dict], gpu_rows: list[dict]) -> bool:
+    if not joined_users or not gpu_rows:
+        return False
+    return any(
+        float(row.get("memory_used_g", 0)) > 0 or float(row.get("compute_percent", 0)) > 0
+        for row in gpu_rows
+    )
+
+
+def build_authorized_user_process_command(usernames: list[str]) -> Optional[str]:
+    normalized_usernames: list[str] = []
+    seen_usernames: set[str] = set()
+
+    for username in usernames:
+        normalized_username = str(username or "").strip()
+        if (
+            not normalized_username
+            or normalized_username in seen_usernames
+            or not SAFE_USERNAME_PATTERN.fullmatch(normalized_username)
+        ):
+            continue
+        seen_usernames.add(normalized_username)
+        normalized_usernames.append(normalized_username)
+
+    if not normalized_usernames:
+        return None
+
+    user_conditions = " || ".join(f'$2==\"{username}\"' for username in normalized_usernames)
+    return f"{PROCESS_SCAN_BASE_COMMAND} | awk '{user_conditions} {{print}}'"
+
+
+def filter_suspected_gpu_processes(process_items: list[dict]) -> list[dict]:
+    filtered_items: list[dict] = []
+    for item in process_items:
+        process_name = str(item.get("process_name") or "").strip()
+        if not process_name:
+            continue
+
+        command_token = process_name.split(None, 1)[0]
+        command_name = os.path.basename(command_token).lower()
+        process_name_lower = process_name.lower()
+
+        has_task_keyword = any(keyword in process_name_lower for keyword in TASK_KEYWORDS)
+        has_task_token = bool(TASK_TOKEN_PATTERN.search(process_name_lower))
+        has_module_marker = bool(MODULE_MARKER_PATTERN.search(process_name_lower))
+        has_python_script = ".py" in process_name_lower
+
+        if PYTHON_INTERPRETER_PATTERN.fullmatch(command_name) or command_name == "ipython":
+            if has_task_keyword or has_task_token or has_module_marker or has_python_script:
+                filtered_items.append(item)
+            continue
+
+        if has_task_keyword or has_task_token:
+            filtered_items.append(item)
+
+    return filtered_items
+
+
+def build_process_rows(process_items: list[dict], joined_users: list[dict], timestamp: str) -> list[dict]:
+    user_id_map = {
+        str(item["username"]): int(item["user_id"])
+        for item in joined_users
+        if item.get("username") and item.get("user_id") is not None
+    }
+    process_rows: list[dict] = []
+    seen_pids: set[int] = set()
+
+    for item in process_items:
+        try:
+            pid = int(item["pid"])
+        except (TypeError, ValueError, KeyError):
+            continue
+
+        if pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+
+        linux_username = str(item.get("linux_username") or "").strip()
+        process_name = str(item.get("process_name") or "").strip()
+        if not linux_username or not process_name:
+            continue
+
+        process_rows.append(
+            {
+                "user_id": user_id_map.get(linux_username),
+                "linux_username": linux_username,
+                "pid": pid,
+                "process_name": process_name,
+                "updated_at": timestamp,
+            }
+        )
+
+    return process_rows
 
 
 def save_runtime_snapshot(

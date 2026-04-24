@@ -2111,6 +2111,31 @@ button:disabled {
   box-shadow: 0 34px 64px rgba(0, 0, 0, 0.32);
 }
 
+.workspace-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: min(calc(100vh - 48px), 720px);
+  overflow: hidden;
+}
+
+.workspace-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px;
+}
+
+.workspace-dialog-actions {
+  flex: 0 0 auto;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(10, 14, 22, 0), rgba(10, 14, 22, 0.96) 28%);
+}
+
 .account-dialog.is-compact {
   width: min(100%, 700px);
   height: min(calc(100vh - 48px), 680px);
@@ -2308,6 +2333,7 @@ button:disabled {
   display: grid;
   gap: 12px;
   margin-top: 18px;
+  padding-bottom: 4px;
 }
 
 .join-key-card {
@@ -2546,6 +2572,24 @@ button:disabled {
 
   .account-trigger,
   .account-dropdown {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workspace-dialog {
+    max-height: calc(100vh - 32px);
+    padding: 20px;
+  }
+
+  .workspace-dialog-body {
+    padding-right: 2px;
+  }
+
+  .workspace-dialog-actions {
+    width: 100%;
+  }
+
+  .workspace-dialog-actions .detail-action-button {
     width: 100%;
     min-width: 0;
   }
