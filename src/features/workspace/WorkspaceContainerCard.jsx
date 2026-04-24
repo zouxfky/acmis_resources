@@ -12,7 +12,7 @@ const containerStatusClassMap = {
   disabled: "is-disabled"
 };
 
-const COLLAPSED_CARD_HEIGHT = 550;
+const COLLAPSED_CARD_HEIGHT = 600;
 const CARD_AUTO_COLLAPSE_DELAY_MS = 60_000;
 
 export function WorkspaceContainerCard({
