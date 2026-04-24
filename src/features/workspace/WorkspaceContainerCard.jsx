@@ -270,6 +270,9 @@ export function WorkspaceContainerCard({
                         <span className="container-port-mapping-label">公网</span>
                         <strong className="container-port-mapping-port">{portMapping.publicPort}</strong>
                       </div>
+                      <div className="container-port-mapping-arrow" aria-hidden="true">
+                        <span />
+                      </div>
                       <div className="container-port-mapping-item">
                         <span className="container-port-mapping-label">容器</span>
                         <strong className="container-port-mapping-port">{portMapping.containerPort}</strong>
