@@ -310,8 +310,7 @@ export function WorkspaceContainerCard({
             onClick={() => onToggleCardExpand(container.id)}
           >
             <svg className="container-card-toggle-icon" viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M5 7.5L10 12.5L15 7.5" />
-              <path d="M5 11L10 16L15 11" />
+              <path d="M5.5 8L10 12.5L14.5 8" />
             </svg>
           </button>
         </div>

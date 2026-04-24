@@ -2032,39 +2032,67 @@ button:disabled {
 }
 
 .container-card-expand-row {
+  position: relative;
   display: flex;
+  align-items: center;
   justify-content: center;
-  margin-top: 6px;
+  margin-top: 4px;
+  padding: 6px 0 2px;
+}
+
+.container-card-expand-row::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 0%,
+    rgba(255, 255, 255, 0.08) 18%,
+    rgba(255, 241, 201, 0.22) 50%,
+    rgba(255, 255, 255, 0.08) 82%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .container-card-toggle {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 36px;
+  width: 58px;
+  height: 22px;
   min-height: 0;
   padding: 0;
   border-radius: 999px;
-  color: rgba(255, 241, 201, 0.82);
-  border-color: rgba(255, 241, 201, 0.14);
-  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 241, 201, 0.7);
+  border-color: rgba(255, 241, 201, 0.1);
+  background: rgba(10, 14, 22, 0.92);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.015);
 }
 
 .container-card-toggle:hover {
-  border-color: rgba(255, 241, 201, 0.24);
-  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 241, 201, 0.88);
+  border-color: rgba(255, 241, 201, 0.18);
+  background: rgba(12, 17, 26, 0.98);
 }
 
 .container-card-toggle-icon {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: transform 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    stroke 0.2s ease;
 }
 
 .container-card-toggle.is-expanded .container-card-toggle-icon {
