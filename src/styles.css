@@ -1430,6 +1430,9 @@ button:disabled {
 .container-card {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  height: var(--container-card-collapsed-height, 550px);
+  min-height: var(--container-card-collapsed-height, 550px);
+  overflow: hidden;
   padding: 22px;
   border-radius: 24px;
   background:
@@ -1440,6 +1443,11 @@ button:disabled {
     transform 0.2s ease,
     border-color 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+.container-card.is-expanded {
+  height: auto;
+  overflow: visible;
 }
 
 .container-card:hover {
@@ -1699,12 +1707,8 @@ button:disabled {
   gap: 16px;
   margin-top: 16px;
   min-height: 0;
-  position: relative;
-}
-
-.container-card.is-collapsible .container-card-body {
-  max-height: 420px;
   overflow: hidden;
+  position: relative;
 }
 
 .container-card.is-collapsible:not(.is-expanded) .container-card-body::after {
@@ -1719,7 +1723,6 @@ button:disabled {
 }
 
 .container-card.is-expanded .container-card-body {
-  max-height: none;
   overflow: visible;
 }
 
@@ -2053,22 +2056,19 @@ button:disabled {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.container-card-toggle-glyph {
-  display: grid;
-  gap: 2px;
+.container-card-toggle-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transition: transform 0.2s ease;
 }
 
-.container-card-toggle.is-expanded .container-card-toggle-glyph {
+.container-card-toggle.is-expanded .container-card-toggle-icon {
   transform: rotate(180deg);
-}
-
-.container-card-toggle-glyph span {
-  width: 8px;
-  height: 8px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg);
 }
 
 .container-button {

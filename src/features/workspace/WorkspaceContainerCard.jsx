@@ -12,7 +12,7 @@ const containerStatusClassMap = {
   disabled: "is-disabled"
 };
 
-const COLLAPSED_BODY_MAX_HEIGHT = 420;
+const COLLAPSED_CARD_HEIGHT = 550;
 const CARD_AUTO_COLLAPSE_DELAY_MS = 60_000;
 
 export function WorkspaceContainerCard({
@@ -25,7 +25,7 @@ export function WorkspaceContainerCard({
   onOpenJoinDialog,
   onOpenLeaveDialog
 }) {
-  const runtimeRef = useRef(null);
+  const cardBodyRef = useRef(null);
   const autoCollapseTimeoutRef = useRef(null);
   const [cardCollapsible, setCardCollapsible] = useState(false);
   const isJoined = container.joinedKeyIds.length > 0;
@@ -76,35 +76,51 @@ export function WorkspaceContainerCard({
   }
 
   useEffect(() => {
+    if (cardExpanded) {
+      return undefined;
+    }
+
     function updateCollapsibleState() {
-      const runtimeElement = runtimeRef.current;
-      const nextCollapsible =
-        Boolean(runtimeElement) && runtimeElement.scrollHeight > COLLAPSED_BODY_MAX_HEIGHT + 1;
+      const cardBodyElement = cardBodyRef.current;
+      if (!cardBodyElement) {
+        setCardCollapsible(false);
+        return;
+      }
+
+      const nextCollapsible = cardBodyElement.scrollHeight > cardBodyElement.clientHeight + 1;
 
       setCardCollapsible((current) => (current === nextCollapsible ? current : nextCollapsible));
     }
 
     updateCollapsibleState();
 
-    const runtimeElement = runtimeRef.current;
+    const cardBodyElement = cardBodyRef.current;
     const resizeObserver =
-      typeof ResizeObserver !== "undefined" && runtimeElement
+      typeof ResizeObserver !== "undefined" && cardBodyElement
         ? new ResizeObserver(() => {
-            updateCollapsibleState();
+            if (!cardExpanded) {
+              updateCollapsibleState();
+            }
           })
         : null;
 
-    if (resizeObserver && runtimeElement) {
-      resizeObserver.observe(runtimeElement);
+    if (resizeObserver && cardBodyElement) {
+      resizeObserver.observe(cardBodyElement);
     }
 
-    window.addEventListener("resize", updateCollapsibleState);
+    function handleWindowResize() {
+      if (!cardExpanded) {
+        updateCollapsibleState();
+      }
+    }
+
+    window.addEventListener("resize", handleWindowResize);
 
     return () => {
       if (resizeObserver) {
         resizeObserver.disconnect();
       }
-      window.removeEventListener("resize", updateCollapsibleState);
+      window.removeEventListener("resize", handleWindowResize);
     };
   }, [container, cardExpanded]);
 
@@ -124,6 +140,7 @@ export function WorkspaceContainerCard({
       key={container.id}
       onMouseEnter={handleCardMouseEnter}
       onMouseLeave={handleCardMouseLeave}
+      style={{ "--container-card-collapsed-height": `${COLLAPSED_CARD_HEIGHT}px` }}
     >
       <div className="container-card-head">
         <div>
@@ -161,8 +178,8 @@ export function WorkspaceContainerCard({
         </div>
       </div>
 
-      <div className="container-card-body">
-        <div className="container-runtime" ref={runtimeRef}>
+      <div className="container-card-body" ref={cardBodyRef}>
+        <div className="container-runtime">
           <div className="container-runtime-block">
             <div className="container-runtime-heading">
               <span className="container-runtime-label">资源使用情况</span>
@@ -292,11 +309,10 @@ export function WorkspaceContainerCard({
             aria-label={cardExpanded ? "收起详情" : "展开详情"}
             onClick={() => onToggleCardExpand(container.id)}
           >
-            <span className="container-card-toggle-glyph" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
+            <svg className="container-card-toggle-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M5 7.5L10 12.5L15 7.5" />
+              <path d="M5 11L10 16L15 11" />
+            </svg>
           </button>
         </div>
       ) : null}
