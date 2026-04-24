@@ -266,11 +266,11 @@ export function WorkspaceContainerCard({
                   <div className="container-port-mapping-card" key={`${container.id}-${portMapping.id}`}>
                     <strong className="container-port-mapping-title">{portMapping.title}</strong>
                     <div className="container-port-mapping-values">
-                      <div className="container-port-mapping-endpoint">
+                      <div className="container-port-mapping-item">
                         <span className="container-port-mapping-label">公网</span>
                         <strong className="container-port-mapping-port">{portMapping.publicPort}</strong>
                       </div>
-                      <div className="container-port-mapping-endpoint is-container">
+                      <div className="container-port-mapping-item">
                         <span className="container-port-mapping-label">容器</span>
                         <strong className="container-port-mapping-port">{portMapping.containerPort}</strong>
                       </div>

@@ -2004,31 +2004,18 @@ button:disabled {
 
 .container-port-mapping-values {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
-.container-port-mapping-endpoint {
+.container-port-mapping-item {
   display: grid;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
-  padding: 10px 10px 11px;
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.container-port-mapping-endpoint.is-container {
-  background:
-    linear-gradient(180deg, rgba(96, 165, 250, 0.1), rgba(255, 255, 255, 0.025)),
-    rgba(255, 255, 255, 0.04);
-  border-color: rgba(96, 165, 250, 0.16);
 }
 
 .container-port-mapping-label {
-  color: var(--text-muted);
+  color: rgba(255, 244, 223, 0.54);
   font-size: 0.68rem;
   line-height: 1;
   white-space: nowrap;
@@ -2037,11 +2024,14 @@ button:disabled {
 
 .container-port-mapping-port {
   color: #fff7ea;
-  font-size: 1.28rem;
+  font-size: clamp(1.08rem, 1.2vw, 1.34rem);
   font-weight: 800;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .container-process-chip {
