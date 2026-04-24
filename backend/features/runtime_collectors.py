@@ -17,7 +17,7 @@ GPU_COMMAND = (
 )
 CPU_COMMAND = "top -bn1 | head -n 5"
 MEMORY_COMMAND = "free -b | awk 'NR==2 {print $2, $3}'"
-PROCESS_SCAN_BASE_COMMAND = "ps -eww -o pid=,user=,args="
+PROCESS_SCAN_BASE_COMMAND = "ps -eww -o pid=,user:64=,args="
 SAFE_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 PYTHON_INTERPRETER_PATTERN = re.compile(r"^python(?:\d+(?:\.\d+)*)?$")
 TASK_TOKEN_PATTERN = re.compile(r"(^|\s)(train|serve|infer|eval)(\s|$)")
