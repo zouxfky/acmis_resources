@@ -1974,6 +1974,76 @@ button:disabled {
   gap: 8px;
 }
 
+.container-port-mapping-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.container-port-mapping-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(125, 211, 252, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.container-port-mapping-title {
+  color: rgba(255, 241, 201, 0.72);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.container-port-mapping-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+}
+
+.container-port-mapping-endpoint {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 10px 11px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.container-port-mapping-endpoint.is-container {
+  background:
+    linear-gradient(180deg, rgba(96, 165, 250, 0.1), rgba(255, 255, 255, 0.025)),
+    rgba(255, 255, 255, 0.04);
+  border-color: rgba(96, 165, 250, 0.16);
+}
+
+.container-port-mapping-label {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+
+.container-port-mapping-port {
+  color: #fff7ea;
+  font-size: 1.28rem;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
 .container-process-chip {
   display: grid;
   gap: 4px;
@@ -2662,6 +2732,10 @@ button:disabled {
   }
 
   .system-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .container-port-mapping-list {
     grid-template-columns: 1fr;
   }
 

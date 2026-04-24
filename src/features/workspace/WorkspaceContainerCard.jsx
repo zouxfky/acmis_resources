@@ -261,11 +261,20 @@ export function WorkspaceContainerCard({
           <div className="container-runtime-block">
             <span className="container-runtime-label">端口映射</span>
             {container.portMappings.length > 0 ? (
-              <div className="container-process-chip-list">
+              <div className="container-port-mapping-list">
                 {container.portMappings.map((portMapping) => (
-                  <div className="container-process-chip" key={`${container.id}-${portMapping.id}`}>
-                    <span className="container-process-owner">{portMapping.title}</span>
-                    <strong className="container-process-command">{portMapping.summary}</strong>
+                  <div className="container-port-mapping-card" key={`${container.id}-${portMapping.id}`}>
+                    <strong className="container-port-mapping-title">{portMapping.title}</strong>
+                    <div className="container-port-mapping-values">
+                      <div className="container-port-mapping-endpoint">
+                        <span className="container-port-mapping-label">公网</span>
+                        <strong className="container-port-mapping-port">{portMapping.publicPort}</strong>
+                      </div>
+                      <div className="container-port-mapping-endpoint is-container">
+                        <span className="container-port-mapping-label">容器</span>
+                        <strong className="container-port-mapping-port">{portMapping.containerPort}</strong>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
