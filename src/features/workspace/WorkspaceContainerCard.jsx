@@ -58,6 +58,14 @@ export function WorkspaceContainerCard({
           <span className="container-subtitle">{container.gpu}</span>
         </div>
         <div className="container-card-badges">
+          <button
+            className="ghost-button container-card-toggle"
+            type="button"
+            aria-expanded={cardExpanded}
+            onClick={() => onToggleCardExpand(container.id)}
+          >
+            {cardExpanded ? "收起详情" : "展开详情"}
+          </button>
           <div className="container-occupancy-wrap">
             <button
               className="container-occupancy"
@@ -207,14 +215,6 @@ export function WorkspaceContainerCard({
       </div>
 
       <div className="container-card-footer">
-        <button
-          className="ghost-button container-card-toggle"
-          type="button"
-          aria-expanded={cardExpanded}
-          onClick={() => onToggleCardExpand(container.id)}
-        >
-          {cardExpanded ? "收起详情" : "展开详情"}
-        </button>
         <button
           className={`primary-button container-button join-button${joinDisabled ? " is-disabled" : ""}`}
           type="button"

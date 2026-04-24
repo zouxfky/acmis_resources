@@ -1430,7 +1430,7 @@ button:disabled {
 .container-card {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 760px;
+  height: 680px;
   overflow: hidden;
   padding: 22px;
   border-radius: 24px;
@@ -2031,7 +2031,6 @@ button:disabled {
 }
 
 .container-card-toggle {
-  grid-column: 1 / -1;
   min-height: 40px;
   padding: 9px 14px;
   border-radius: 12px;
