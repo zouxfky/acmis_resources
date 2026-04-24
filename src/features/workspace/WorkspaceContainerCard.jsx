@@ -12,7 +12,7 @@ const containerStatusClassMap = {
   disabled: "is-disabled"
 };
 
-const COLLAPSED_CARD_HEIGHT = 600;
+const COLLAPSED_CARD_HEIGHT = 620;
 const CARD_AUTO_COLLAPSE_DELAY_MS = 60_000;
 
 export function WorkspaceContainerCard({
@@ -264,17 +264,16 @@ export function WorkspaceContainerCard({
               <div className="container-port-mapping-list">
                 {container.portMappings.map((portMapping) => (
                   <div className="container-port-mapping-card" key={`${container.id}-${portMapping.id}`}>
-                    <strong className="container-port-mapping-title">{portMapping.title}</strong>
                     <div className="container-port-mapping-values">
                       <div className="container-port-mapping-item">
-                        <span className="container-port-mapping-label">公网</span>
+                        <span className="container-port-mapping-label">公网端口</span>
                         <strong className="container-port-mapping-port">{portMapping.publicPort}</strong>
                       </div>
                       <div className="container-port-mapping-arrow" aria-hidden="true">
                         <span />
                       </div>
                       <div className="container-port-mapping-item">
-                        <span className="container-port-mapping-label">容器</span>
+                        <span className="container-port-mapping-label">容器端口</span>
                         <strong className="container-port-mapping-port">{portMapping.containerPort}</strong>
                       </div>
                     </div>
