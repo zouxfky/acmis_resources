@@ -78,6 +78,25 @@ export function splitProcessDisplay(processItem) {
   };
 }
 
+export function formatPortMappingSummary(portMapping) {
+  const slotIndex = Number(portMapping?.slot_index);
+  const publicPort = Number(portMapping?.public_port);
+  const containerPort = Number(portMapping?.container_port);
+
+  if (!Number.isInteger(slotIndex) || !Number.isInteger(publicPort) || !Number.isInteger(containerPort)) {
+    return null;
+  }
+
+  return {
+    id: `slot-${slotIndex}`,
+    slotIndex,
+    title: `端口${slotIndex}`,
+    summary: `公网 ${publicPort} -> 容器 ${containerPort}`,
+    publicPort,
+    containerPort
+  };
+}
+
 export function areIdSetsEqual(left, right) {
   const leftIds = [...new Set((left || []).map(Number))].sort((a, b) => a - b);
   const rightIds = [...new Set((right || []).map(Number))].sort((a, b) => a - b);
@@ -111,6 +130,12 @@ export function enrichWorkspaceContainer(container) {
           owner: String(item.process_user || item.linux_username || "未知用户"),
           command: String(item.process_name || "").trim() || "-"
         }))
+    : [];
+  const portMappings = Array.isArray(container.port_mappings)
+    ? container.port_mappings
+        .map(formatPortMappingSummary)
+        .filter(Boolean)
+        .sort((left, right) => left.slotIndex - right.slotIndex)
     : [];
   const runtimeGpus = Array.isArray(container.runtime_gpus)
     ? container.runtime_gpus
@@ -166,6 +191,7 @@ export function enrichWorkspaceContainer(container) {
     connectedUsers,
     gpuProcesses,
     runtimeProcesses,
+    portMappings,
     runtimeGpus,
     gpuRuntimeAvailable,
     processRuntimeAvailable,

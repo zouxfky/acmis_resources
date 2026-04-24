@@ -10,10 +10,10 @@ export function WorkspaceContainerGrid({
   onOpenJoinDialog,
   onOpenLeaveDialog
 }) {
-  const [expandedProcessContainerIds, setExpandedProcessContainerIds] = useState({});
+  const [expandedContainerIds, setExpandedContainerIds] = useState({});
 
-  function toggleProcessList(containerId) {
-    setExpandedProcessContainerIds((current) => ({
+  function toggleContainerCard(containerId) {
+    setExpandedContainerIds((current) => ({
       ...current,
       [containerId]: !current[containerId]
     }));
@@ -28,8 +28,8 @@ export function WorkspaceContainerGrid({
             container={container}
             sshKeys={sshKeys}
             workspaceLoading={workspaceLoading}
-            processListExpanded={Boolean(expandedProcessContainerIds[container.id])}
-            onToggleProcessList={toggleProcessList}
+            cardExpanded={Boolean(expandedContainerIds[container.id])}
+            onToggleCardExpand={toggleContainerCard}
             onOpenJoinDialog={onOpenJoinDialog}
             onOpenLeaveDialog={onOpenLeaveDialog}
           />

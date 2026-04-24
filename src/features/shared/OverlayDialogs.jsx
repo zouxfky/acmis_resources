@@ -50,6 +50,7 @@ export function OverlayDialogs({
   adminContainersStatus,
   onCancelAdminContainerEdit,
   onUpdateAdminContainerField,
+  onUpdateAdminContainerPortMapping,
   onSubmitAdminContainer
 }) {
   return (
@@ -68,6 +69,7 @@ export function OverlayDialogs({
         adminContainersStatus={adminContainersStatus}
         onCancelAdminContainerEdit={onCancelAdminContainerEdit}
         onUpdateAdminContainerField={onUpdateAdminContainerField}
+        onUpdateAdminContainerPortMapping={onUpdateAdminContainerPortMapping}
         onSubmitAdminContainer={onSubmitAdminContainer}
       />
 

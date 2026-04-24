@@ -12,6 +12,7 @@ export function AdminDialogs({
   adminContainersStatus,
   onCancelAdminContainerEdit,
   onUpdateAdminContainerField,
+  onUpdateAdminContainerPortMapping,
   onSubmitAdminContainer
 }) {
   return (
@@ -175,6 +176,36 @@ export function AdminDialogs({
                     <option value="disabled">disabled</option>
                   </select>
                 </label>
+              </div>
+
+              <div className="admin-form-grid">
+                {(adminContainerForm.port_mappings || []).map((mapping) => (
+                  <div className="field" key={`port-mapping-${mapping.slot_index}`}>
+                    <span>{`端口${mapping.slot_index}`}</span>
+                    <div className="admin-form-grid">
+                      <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={mapping.public_port}
+                        onChange={(event) =>
+                          onUpdateAdminContainerPortMapping(mapping.slot_index, "public_port", event.target.value)
+                        }
+                        placeholder="公网端口"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={mapping.container_port}
+                        onChange={(event) =>
+                          onUpdateAdminContainerPortMapping(mapping.slot_index, "container_port", event.target.value)
+                        }
+                        placeholder="容器端口"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="admin-inline-actions">

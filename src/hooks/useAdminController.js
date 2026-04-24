@@ -8,7 +8,7 @@ import {
   saveAdminContainerRequest,
   saveAdminUserRequest
 } from "../api/client";
-import { emptyAdminContainerForm, emptyAdminUserForm } from "../app/constants";
+import { createEmptyAdminContainerForm, emptyAdminUserForm } from "../app/constants";
 import { usePollingLeader } from "./usePollingLeader";
 import {
   buildAdminContainerConfirmItems,
@@ -36,7 +36,7 @@ export function useAdminController({
   const [adminContainersStatus, setAdminContainersStatus] = useState("idle");
   const [adminContainersMessage, setAdminContainersMessage] = useState("");
   const [adminUserForm, setAdminUserForm] = useState(emptyAdminUserForm);
-  const [adminContainerForm, setAdminContainerForm] = useState(emptyAdminContainerForm);
+  const [adminContainerForm, setAdminContainerForm] = useState(createEmptyAdminContainerForm());
   const [activeAdminSection, setActiveAdminSection] = useState("users");
   const [selectedAdminUserId, setSelectedAdminUserId] = useState(null);
   const [selectedAdminContainerId, setSelectedAdminContainerId] = useState(null);
@@ -56,7 +56,7 @@ export function useAdminController({
     setAdminContainersStatus("idle");
     setAdminContainersMessage("");
     setAdminUserForm(emptyAdminUserForm);
-    setAdminContainerForm(emptyAdminContainerForm);
+    setAdminContainerForm(createEmptyAdminContainerForm());
     setActiveAdminSection("users");
     setSelectedAdminUserId(null);
     setSelectedAdminContainerId(null);
@@ -147,6 +147,20 @@ export function useAdminController({
     }));
   }
 
+  function updateAdminContainerPortMapping(slotIndex, field, value) {
+    setAdminContainerForm((current) => ({
+      ...current,
+      port_mappings: (current.port_mappings || []).map((item) =>
+        Number(item.slot_index) === Number(slotIndex)
+          ? {
+              ...item,
+              [field]: value
+            }
+          : item
+      )
+    }));
+  }
+
   function startCreateAdminUser() {
     if (adminUserDialogOpen && !adminUserForm.id) {
       cancelAdminUserEdit();
@@ -190,7 +204,7 @@ export function useAdminController({
       cancelAdminContainerEdit();
       return;
     }
-    setAdminContainerForm({ ...emptyAdminContainerForm });
+    setAdminContainerForm(createEmptyAdminContainerForm());
     setAdminContainersStatus("idle");
     setAdminContainersMessage("");
     setSelectedAdminContainerId(null);
@@ -205,7 +219,18 @@ export function useAdminController({
       ssh_port: String(container.ssh_port),
       root_password: "",
       max_users: String(container.max_users),
-      status: container.status
+      status: container.status,
+      port_mappings: Array.from({ length: 3 }, (_, index) => {
+        const slotIndex = index + 1;
+        const existingMapping = Array.isArray(container.port_mappings)
+          ? container.port_mappings.find((item) => Number(item.slot_index) === slotIndex)
+          : null;
+        return {
+          slot_index: slotIndex,
+          public_port: existingMapping ? String(existingMapping.public_port) : "",
+          container_port: existingMapping ? String(existingMapping.container_port) : ""
+        };
+      })
     });
     setAdminContainersStatus("idle");
     setAdminContainersMessage("");
@@ -214,7 +239,7 @@ export function useAdminController({
   }
 
   function cancelAdminContainerEdit() {
-    setAdminContainerForm({ ...emptyAdminContainerForm });
+    setAdminContainerForm(createEmptyAdminContainerForm());
     setAdminContainersStatus("idle");
     setAdminContainersMessage("");
     setSelectedAdminContainerId(null);
@@ -361,7 +386,7 @@ export function useAdminController({
       setAdminContainersStatus("success");
       setAdminContainersMessage("");
       showFloatingTip(containerId ? "服务器已更新" : "新增服务器成功");
-      setAdminContainerForm({ ...emptyAdminContainerForm });
+      setAdminContainerForm(createEmptyAdminContainerForm());
       setSelectedAdminContainerId(null);
       setAdminContainerDialogOpen(false);
     } catch (error) {
@@ -398,7 +423,7 @@ export function useAdminController({
       setAdminContainersMessage("");
       showFloatingTip("删除服务器成功");
       if (adminContainerForm.id === containerId) {
-        setAdminContainerForm({ ...emptyAdminContainerForm });
+        setAdminContainerForm(createEmptyAdminContainerForm());
         setAdminContainerDialogOpen(false);
       }
       if (selectedAdminContainerId === containerId) {
@@ -432,6 +457,7 @@ export function useAdminController({
     resetAdminState,
     updateAdminUserField,
     updateAdminContainerField,
+    updateAdminContainerPortMapping,
     startCreateAdminUser,
     startEditAdminUser,
     cancelAdminUserEdit,

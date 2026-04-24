@@ -61,7 +61,16 @@ export function buildAdminContainerPayload(form) {
     ssh_port: Number(form.ssh_port || 22),
     root_password: form.root_password.trim() || null,
     max_users: Number(form.max_users || 3),
-    status: form.status || "active"
+    status: form.status || "active",
+    port_mappings: (form.port_mappings || []).map((mapping, index) => {
+      const publicPortValue = String(mapping?.public_port ?? "").trim();
+      const containerPortValue = String(mapping?.container_port ?? "").trim();
+      return {
+        slot_index: Number(mapping?.slot_index || index + 1),
+        public_port: publicPortValue ? Number(publicPortValue) : null,
+        container_port: containerPortValue ? Number(containerPortValue) : null
+      };
+    })
   };
 }
 
@@ -70,18 +79,39 @@ export function isAdminContainerPayloadChanged(originalContainer, payload) {
     return true;
   }
 
+  const originalPortMappings = JSON.stringify(
+    (originalContainer.port_mappings || [])
+      .map((mapping) => ({
+        slot_index: Number(mapping.slot_index),
+        public_port: Number(mapping.public_port),
+        container_port: Number(mapping.container_port)
+      }))
+      .sort((left, right) => left.slot_index - right.slot_index)
+  );
+  const nextPortMappings = JSON.stringify(
+    (payload.port_mappings || [])
+      .filter((mapping) => mapping.public_port != null || mapping.container_port != null)
+      .map((mapping) => ({
+        slot_index: Number(mapping.slot_index),
+        public_port: Number(mapping.public_port),
+        container_port: Number(mapping.container_port)
+      }))
+      .sort((left, right) => left.slot_index - right.slot_index)
+  );
+
   return (
     payload.name !== (originalContainer.name || "") ||
     payload.host !== (originalContainer.host || "") ||
     payload.ssh_port !== Number(originalContainer.ssh_port ?? 22) ||
     Boolean(payload.root_password) ||
     payload.max_users !== Number(originalContainer.max_users ?? 3) ||
-    payload.status !== (originalContainer.status || "active")
+    payload.status !== (originalContainer.status || "active") ||
+    originalPortMappings !== nextPortMappings
   );
 }
 
 export function buildAdminContainerConfirmItems(form, payload) {
-  return [
+  const items = [
     { id: "name", label: "名称", value: payload.name || "-" },
     { id: "host", label: "主机", value: payload.host || "-" },
     {
@@ -94,4 +124,17 @@ export function buildAdminContainerConfirmItems(form, payload) {
     { id: "status", label: "状态", value: payload.status },
     { id: "max_users", label: "最大人数", value: String(payload.max_users) }
   ];
+
+  (payload.port_mappings || []).forEach((mapping) => {
+    if (mapping.public_port == null || mapping.container_port == null) {
+      return;
+    }
+    items.push({
+      id: `port-mapping-${mapping.slot_index}`,
+      label: `端口${mapping.slot_index}`,
+      value: `公网 ${mapping.public_port} -> 容器 ${mapping.container_port}`
+    });
+  });
+
+  return items;
 }

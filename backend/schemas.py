@@ -48,6 +48,12 @@ class AdminUserUpdatePayload(BaseModel):
     max_containers_per_user: int = Field(default=DEFAULT_MAX_CONTAINERS_PER_USER, ge=1, le=50)
 
 
+class AdminContainerPortMappingPayload(BaseModel):
+    slot_index: int = Field(ge=1, le=3)
+    public_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    container_port: Optional[int] = Field(default=None, ge=1, le=65535)
+
+
 class AdminContainerCreatePayload(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     host: str = Field(min_length=1, max_length=255)
@@ -55,6 +61,7 @@ class AdminContainerCreatePayload(BaseModel):
     root_password: Optional[str] = Field(default=None, max_length=255)
     max_users: int = Field(default=3, ge=1, le=999)
     status: str = Field(default="active")
+    port_mappings: list[AdminContainerPortMappingPayload] = Field(default_factory=list)
 
 
 class AdminContainerUpdatePayload(BaseModel):
@@ -64,3 +71,4 @@ class AdminContainerUpdatePayload(BaseModel):
     root_password: Optional[str] = Field(default=None, max_length=255)
     max_users: int = Field(default=3, ge=1, le=999)
     status: str = Field(default="active")
+    port_mappings: list[AdminContainerPortMappingPayload] = Field(default_factory=list)

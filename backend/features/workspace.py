@@ -9,6 +9,7 @@ from backend.core.config import (
 from backend.core.db import get_connection
 from backend.core.helpers import compute_ssh_fingerprint
 from backend.core.security import require_authenticated_user
+from backend.features.container_port_mappings import fetch_container_port_mapping_map
 from backend.features.runtime import (
     build_runtime_payload_for_container,
     fetch_container_runtime_payload,
@@ -89,6 +90,7 @@ def fetch_workspace_containers(user_id: int, container_ids: Optional[list[int]] 
             container_params,
         ).fetchall()
         system_map, gpu_runtime_map, process_runtime_map = fetch_runtime_snapshot_maps(connection, container_ids)
+        port_mapping_map = fetch_container_port_mapping_map(connection, [int(row["id"]) for row in container_rows])
 
         joined_binding_sql = """
             SELECT scb.container_id, scb.ssh_key_id
@@ -195,6 +197,7 @@ def fetch_workspace_containers(user_id: int, container_ids: Optional[list[int]] 
                 "runtime_gpus": runtime_payload["runtime_gpus"],
                 "gpu_processes": process_map.get(row["id"], []),
                 "runtime_processes": process_detail_map.get(row["id"], []),
+                "port_mappings": port_mapping_map.get(int(row["id"]), []),
                 "status": row["status"],
                 "active_user_count": row["active_user_count"],
                 "joined_key_ids": joined_key_map.get(row["id"], []),

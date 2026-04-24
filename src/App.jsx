@@ -185,6 +185,7 @@ export default function App() {
         adminContainersStatus={controller.adminContainersStatus}
         onCancelAdminContainerEdit={controller.cancelAdminContainerEdit}
         onUpdateAdminContainerField={controller.updateAdminContainerField}
+        onUpdateAdminContainerPortMapping={controller.updateAdminContainerPortMapping}
         onSubmitAdminContainer={controller.handleAdminContainerSubmit}
       />
 

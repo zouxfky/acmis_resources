@@ -14,8 +14,8 @@ export function WorkspaceContainerCard({
   container,
   sshKeys,
   workspaceLoading,
-  processListExpanded,
-  onToggleProcessList,
+  cardExpanded,
+  onToggleCardExpand,
   onOpenJoinDialog,
   onOpenLeaveDialog
 }) {
@@ -42,14 +42,10 @@ export function WorkspaceContainerCard({
   const leaveButtonLabel = isCooldownActive ? `冷却中 ${cooldownLabel}` : "退出容器";
   const statusLabel = containerStatusLabelMap[container.status] || container.status || "未知";
   const statusClassName = containerStatusClassMap[container.status] || "";
-  const visibleRuntimeProcesses = processListExpanded
-    ? container.runtimeProcesses
-    : container.runtimeProcesses.slice(0, 3);
-  const hiddenProcessCount = Math.max(0, container.runtimeProcesses.length - 3);
 
   return (
     <article
-      className={`container-card${isJoined ? " is-joined" : ""}${container.status === "active" ? " is-active" : ""}${container.status === "offline" ? " is-offline" : ""}${container.status === "disabled" ? " is-disabled" : ""}`}
+      className={`container-card${isJoined ? " is-joined" : ""}${container.status === "active" ? " is-active" : ""}${container.status === "offline" ? " is-offline" : ""}${container.status === "disabled" ? " is-disabled" : ""}${cardExpanded ? " is-expanded" : ""}`}
       key={container.id}
     >
       <div className="container-card-head">
@@ -169,42 +165,38 @@ export function WorkspaceContainerCard({
           </div>
 
           <div className="container-runtime-block">
+            <span className="container-runtime-label">端口映射</span>
+            {container.portMappings.length > 0 ? (
+              <div className="container-process-chip-list">
+                {container.portMappings.map((portMapping) => (
+                  <div className="container-process-chip" key={`${container.id}-${portMapping.id}`}>
+                    <span className="container-process-owner">{portMapping.title}</span>
+                    <strong className="container-process-command">{portMapping.summary}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="container-runtime-empty">当前暂无端口映射</p>
+            )}
+          </div>
+
+          <div className="container-runtime-block">
             <span className="container-runtime-label">疑似 GPU 占用进程</span>
             {container.processRuntimeAvailable && container.runtimeProcesses.length > 0 ? (
-              <>
-                <div className="container-process-chip-list">
-                  {visibleRuntimeProcesses.map((processItem) => {
-                    return (
-                      <div
-                        className="container-process-chip"
-                        key={processItem.id}
-                        title={`${processItem.owner} / ${processItem.command}`}
-                      >
-                        <span className="container-process-owner">{processItem.owner}</span>
-                        <strong className="container-process-command">{processItem.command}</strong>
-                      </div>
-                    );
-                  })}
-                </div>
-                {hiddenProcessCount > 0 || processListExpanded ? (
-                  <div className="container-runtime-meta-row">
-                    {hiddenProcessCount > 0 && !processListExpanded ? (
-                      <p className="container-runtime-meta">另有 {hiddenProcessCount} 个进程</p>
-                    ) : (
-                      <span className="container-runtime-meta">共 {container.runtimeProcesses.length} 个进程</span>
-                    )}
-                    {container.runtimeProcesses.length > 3 ? (
-                      <button
-                        className="ghost-button container-process-toggle"
-                        type="button"
-                        onClick={() => onToggleProcessList(container.id)}
-                      >
-                        {processListExpanded ? "收起" : "展开全部"}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
+              <div className="container-process-chip-list">
+                {container.runtimeProcesses.map((processItem) => {
+                  return (
+                    <div
+                      className="container-process-chip"
+                      key={processItem.id}
+                      title={`${processItem.owner} / ${processItem.command}`}
+                    >
+                      <span className="container-process-owner">{processItem.owner}</span>
+                      <strong className="container-process-command">{processItem.command}</strong>
+                    </div>
+                  );
+                })}
+              </div>
             ) : !container.processRuntimeAvailable ? (
               <p className="container-runtime-empty">当前暂无数据</p>
             ) : (
@@ -215,6 +207,14 @@ export function WorkspaceContainerCard({
       </div>
 
       <div className="container-card-footer">
+        <button
+          className="ghost-button container-card-toggle"
+          type="button"
+          aria-expanded={cardExpanded}
+          onClick={() => onToggleCardExpand(container.id)}
+        >
+          {cardExpanded ? "收起详情" : "展开详情"}
+        </button>
         <button
           className={`primary-button container-button join-button${joinDisabled ? " is-disabled" : ""}`}
           type="button"

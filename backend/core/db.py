@@ -76,6 +76,19 @@ def init_db() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS container_port_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                container_id INTEGER NOT NULL,
+                slot_index INTEGER NOT NULL,
+                public_port INTEGER NOT NULL,
+                container_port INTEGER NOT NULL,
+                UNIQUE(container_id, slot_index),
+                UNIQUE(public_port)
+            )
+            """
+        )
         create_runtime_schema_tables(connection)
         connection.execute(
             """

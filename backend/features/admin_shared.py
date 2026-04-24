@@ -1,6 +1,7 @@
 import sqlite3
 
 from backend.core.db import get_connection
+from backend.features.container_port_mappings import fetch_container_port_mapping_map
 from backend.features.runtime import (
     build_runtime_payload_for_container,
     fetch_runtime_snapshot_maps,
@@ -61,7 +62,7 @@ def fetch_admin_users() -> list[dict]:
 
 
 def fetch_admin_container_detail(connection: sqlite3.Connection, container_id: int):
-    return connection.execute(
+    row = connection.execute(
         """
         SELECT
             id,
@@ -81,6 +82,12 @@ def fetch_admin_container_detail(connection: sqlite3.Connection, container_id: i
         """,
         (container_id,),
     ).fetchone()
+    if not row:
+        return None
+    port_mapping_map = fetch_container_port_mapping_map(connection, [container_id])
+    item = dict(row)
+    item["port_mappings"] = port_mapping_map.get(container_id, [])
+    return item
 
 
 def fetch_admin_containers() -> list[dict]:
@@ -111,6 +118,7 @@ def fetch_admin_containers() -> list[dict]:
             """
         ).fetchall()
         system_map, gpu_runtime_map, _ = fetch_runtime_snapshot_maps(connection)
+        port_mapping_map = fetch_container_port_mapping_map(connection, [int(row["id"]) for row in rows])
 
     items = []
     for row in rows:
@@ -129,6 +137,7 @@ def fetch_admin_containers() -> list[dict]:
                 "memory_usage_percent": runtime_payload["memory_usage_percent"],
                 "memory_usage_summary": runtime_payload["memory_usage_summary"],
                 "runtime_updated_at": runtime_payload["runtime_updated_at"],
+                "port_mappings": port_mapping_map.get(int(row["id"]), []),
             }
         )
         items.append(item)

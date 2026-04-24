@@ -10,15 +10,26 @@ export const emptyAdminUserForm = {
   max_containers_per_user: ""
 };
 
-export const emptyAdminContainerForm = {
-  id: null,
-  name: "",
-  host: "",
-  ssh_port: "",
-  root_password: "",
-  max_users: "",
-  status: ""
-};
+export function createEmptyAdminContainerPortMappings() {
+  return Array.from({ length: 3 }, (_, index) => ({
+    slot_index: index + 1,
+    public_port: "",
+    container_port: ""
+  }));
+}
+
+export function createEmptyAdminContainerForm() {
+  return {
+    id: null,
+    name: "",
+    host: "",
+    ssh_port: "",
+    root_password: "",
+    max_users: "",
+    status: "",
+    port_mappings: createEmptyAdminContainerPortMappings()
+  };
+}
 
 export const adminSectionCatalog = [
   { id: "users", label: "用户管理" },

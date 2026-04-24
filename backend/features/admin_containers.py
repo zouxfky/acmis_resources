@@ -10,6 +10,11 @@ from backend.core.helpers import (
 )
 from backend.core.security import require_admin_user
 from backend.features.admin_shared import fetch_admin_container_detail, fetch_admin_containers
+from backend.features.container_port_mappings import (
+    ensure_public_ports_available,
+    normalize_container_port_mappings,
+    replace_container_port_mappings,
+)
 from backend.features.container_ssh_access import (
     acquire_container_user_sync_locks,
     ensure_container_ssh_available,
@@ -81,10 +86,12 @@ def create_admin_container(payload: AdminContainerCreatePayload, request: Reques
     host = payload.host.strip()
     root_password = normalize_optional_text(payload.root_password) or ""
     container_status = validate_container_status(payload.status)
+    port_mappings = normalize_container_port_mappings(payload.port_mappings)
     hardware_info = inspect_ssh_container_hardware(host, payload.ssh_port, root_password)
 
     try:
         with get_connection() as connection:
+            ensure_public_ports_available(connection, port_mappings)
             cursor = connection.execute(
                 """
                 INSERT INTO containers (
@@ -117,6 +124,7 @@ def create_admin_container(payload: AdminContainerCreatePayload, request: Reques
                 ),
             )
             container_id = cursor.lastrowid
+            replace_container_port_mappings(connection, int(container_id), port_mappings)
             upsert_container_runtime_system(connection, int(container_id))
             connection.commit()
     except sqlite3.IntegrityError as exc:
@@ -139,6 +147,7 @@ def update_admin_container(container_id: int, payload: AdminContainerUpdatePaylo
     host = payload.host.strip()
     root_password = normalize_optional_text(payload.root_password)
     container_status = validate_container_status(payload.status)
+    port_mappings = normalize_container_port_mappings(payload.port_mappings)
 
     with get_connection() as connection:
         existing = connection.execute(
@@ -154,6 +163,7 @@ def update_admin_container(container_id: int, payload: AdminContainerUpdatePaylo
 
         effective_root_password = root_password or str(existing["root_password"] or "").strip()
         hardware_info = inspect_ssh_container_hardware(host, payload.ssh_port, effective_root_password)
+        ensure_public_ports_available(connection, port_mappings, container_id)
 
         try:
             connection.execute(
@@ -188,6 +198,7 @@ def update_admin_container(container_id: int, payload: AdminContainerUpdatePaylo
                     container_id,
                 ),
             )
+            replace_container_port_mappings(connection, container_id, port_mappings)
             upsert_container_runtime_system(connection, container_id)
             connection.commit()
         except sqlite3.IntegrityError as exc:
@@ -229,6 +240,7 @@ def delete_admin_container(container_id: int, request: Request) -> dict:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="服务器不存在")
 
                 connection.execute("DELETE FROM ssh_key_container_bindings WHERE container_id = ?", (container_id,))
+                connection.execute("DELETE FROM container_port_mappings WHERE container_id = ?", (container_id,))
                 connection.execute("DELETE FROM container_runtime_processes WHERE container_id = ?", (container_id,))
                 connection.execute("DELETE FROM container_runtime_gpus WHERE container_id = ?", (container_id,))
                 connection.execute("DELETE FROM container_runtime_system WHERE container_id = ?", (container_id,))
