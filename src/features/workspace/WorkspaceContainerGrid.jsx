@@ -19,6 +19,13 @@ export function WorkspaceContainerGrid({
     }));
   }
 
+  function setContainerCardExpanded(containerId, expanded) {
+    setExpandedContainerIds((current) => ({
+      ...current,
+      [containerId]: expanded
+    }));
+  }
+
   return (
     <section className="container-stage">
       <div className="container-grid">
@@ -30,6 +37,7 @@ export function WorkspaceContainerGrid({
             workspaceLoading={workspaceLoading}
             cardExpanded={Boolean(expandedContainerIds[container.id])}
             onToggleCardExpand={toggleContainerCard}
+            onSetCardExpanded={setContainerCardExpanded}
             onOpenJoinDialog={onOpenJoinDialog}
             onOpenLeaveDialog={onOpenLeaveDialog}
           />
