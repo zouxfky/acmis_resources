@@ -2027,14 +2027,12 @@ button:disabled {
 
 .container-port-mapping-port {
   color: #fff7ea;
-  font-size: clamp(1.08rem, 1.2vw, 1.34rem);
+  font-size: clamp(0.96rem, 1.05vw, 1.22rem);
   font-weight: 800;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .container-port-mapping-arrow {
