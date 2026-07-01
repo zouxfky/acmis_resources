@@ -13,7 +13,7 @@ from backend.core.security import hash_password, require_admin_user
 from backend.features.admin_shared import cleanup_orphaned_ssh_keys, fetch_admin_users
 from backend.features.container_ssh_access import (
     acquire_container_user_sync_locks,
-    delete_container_user_home,
+    delete_user_home_on_any_container,
     fetch_user_joined_container_rows,
     rename_container_user_home,
     sync_container_user_authorized_keys,
@@ -273,44 +273,25 @@ def delete_admin_user(user_id: int, request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the current admin account")
 
     with get_connection() as connection:
+        existing = connection.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User does not exist")
+        if existing["role"] == "admin":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin accounts cannot be deleted")
+        username = str(existing["username"])
+
+    delete_user_home_on_any_container(username)
+
+    with get_connection() as connection:
         existing = connection.execute("SELECT id, role FROM users WHERE id = ?", (user_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User does not exist")
         if existing["role"] == "admin":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin accounts cannot be deleted")
+        connection.execute("DELETE FROM user_ssh_key_bindings WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        cleanup_orphaned_ssh_keys(connection)
+        connection.commit()
 
-    joined_container_rows = fetch_user_joined_container_rows(user_id)
-    joined_container_ids = [int(row["id"]) for row in joined_container_rows]
-    lock_items = [(container_id, user_id) for container_id in joined_container_ids]
-    failed_sync_container_ids: list[int] = []
-
-    with acquire_container_user_sync_locks(lock_items):
-        for container_id in joined_container_ids:
-            try:
-                delete_container_user_home(
-                    container_id,
-                    user_id,
-                    allow_inactive=True,
-                )
-            except Exception:
-                failed_sync_container_ids.append(container_id)
-
-        with get_connection() as connection:
-            existing = connection.execute("SELECT id, role FROM users WHERE id = ?", (user_id,)).fetchone()
-            if not existing:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User does not exist")
-            if existing["role"] == "admin":
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin accounts cannot be deleted")
-            connection.execute("DELETE FROM user_ssh_key_bindings WHERE user_id = ?", (user_id,))
-            connection.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-            connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            cleanup_orphaned_ssh_keys(connection)
-            connection.commit()
-
-    if failed_sync_container_ids:
-        return {
-            "ok": True,
-            "message": f"User deleted. Failed to delete remote home on {len(failed_sync_container_ids)} container(s).",
-            "failed_sync_container_ids": failed_sync_container_ids,
-        }
-    return {"ok": True, "message": "User deleted"}
+    return {"ok": True, "message": "用户已删除"}

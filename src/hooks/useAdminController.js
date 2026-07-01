@@ -342,11 +342,11 @@ export function useAdminController({
 
     try {
       const data = await deleteAdminUserRequest(userId, csrfToken);
-      setAdminUsers((current) => current.filter((item) => item.id !== userId));
+      await loadAdminData({ silent: true });
 
       setAdminUsersStatus("success");
       setAdminUsersMessage("");
-      showFloatingTip(data?.message || "User deleted");
+      showFloatingTip(data?.message || "用户已删除");
       if (adminUserForm.id === userId) {
         setAdminUserForm({ ...emptyAdminUserForm });
         setAdminUserDialogOpen(false);

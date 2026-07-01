@@ -264,6 +264,71 @@ def delete_container_user_home(container_id: int, user_id: int, allow_inactive: 
         client.close()
 
 
+def delete_user_home_on_any_container(linux_username: str) -> Optional[int]:
+    linux_username = validate_linux_username(linux_username)
+    command = build_delete_user_home_command(linux_username)
+
+    with get_connection() as connection:
+        container_rows = connection.execute(
+            """
+            SELECT id, host, ssh_port, root_password, status
+            FROM containers
+            WHERE COALESCE(host, '') != ''
+              AND COALESCE(root_password, '') != ''
+            ORDER BY
+              CASE status
+                WHEN 'active' THEN 0
+                WHEN 'offline' THEN 1
+                ELSE 2
+              END,
+              id ASC
+            """
+        ).fetchall()
+
+    if not container_rows:
+        return None
+
+    last_error: Optional[Exception] = None
+    for container_row in container_rows:
+        container_id = int(container_row["id"])
+        host = str(container_row["host"] or "").strip()
+        ssh_port = int(container_row["ssh_port"])
+        root_password = str(container_row["root_password"] or "").strip()
+        try:
+            client = open_root_client(host, ssh_port, root_password)
+        except ContainerSSHConnectError as exc:
+            last_error = exc
+            mark_container_offline(container_id)
+            continue
+
+        try:
+            exec_ssh_command(client, command)
+            return container_id
+        except HTTPException:
+            raise
+        except ContainerSSHConnectError as exc:
+            last_error = exc
+            mark_container_offline(container_id)
+            continue
+        except Exception as exc:
+            LOGGER.exception(
+                "container user home delete failed on fallback container=%s username=%s",
+                container_id,
+                linux_username,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"服务器用户目录删除失败：{host}:{ssh_port}",
+            ) from exc
+        finally:
+            client.close()
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="没有可连接的服务器，用户未删除",
+    ) from last_error
+
+
 def rename_container_user_home(
     container_id: int,
     user_id: int,
