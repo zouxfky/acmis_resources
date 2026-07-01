@@ -7,7 +7,6 @@ import {
   joinContainerRequest,
   leaveContainerRequest
 } from "../api/client";
-import { usePollingLeader } from "./usePollingLeader";
 import { areIdSetsEqual } from "../utils/formatters";
 import {
   decorateWorkspaceContainers,
@@ -45,11 +44,6 @@ export function useWorkspaceController({
   const [leaveDialogMessage, setLeaveDialogMessage] = useState("");
   const [containerActionCooldowns, setContainerActionCooldowns] = useState({});
   const [cooldownNow, setCooldownNow] = useState(Date.now());
-  const { isPollingLeader: isWorkspacePollingLeader } = usePollingLeader({
-    enabled: Boolean(session && activeView === "workspace"),
-    scopeKey: `workspace:${session?.id || "guest"}`
-  });
-
   function resetWorkspaceState() {
     setWorkspaceLoading(false);
     setWorkspaceMessage("");
@@ -207,17 +201,6 @@ export function useWorkspaceController({
 
     loadWorkspaceData();
 
-    if (!isWorkspacePollingLeader) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      loadWorkspaceData({ silent: true });
-    }, 10000);
-
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         loadWorkspaceData({ silent: true });
@@ -227,10 +210,9 @@ export function useWorkspaceController({
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [session, activeView, isWorkspacePollingLeader]);
+  }, [session, activeView]);
 
   async function handleAddSshKey(event) {
     event.preventDefault();
@@ -499,6 +481,7 @@ export function useWorkspaceController({
     resetWorkspaceState,
     resetWorkspaceDialogs,
     setWorkspaceMessage,
+    loadWorkspaceData,
     handleAddSshKey,
     executeAddSshKey,
     handleDeleteSshKey,

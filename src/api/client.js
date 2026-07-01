@@ -66,6 +66,14 @@ export async function fetchWorkspaceRequest() {
   return readJson(response);
 }
 
+export async function sendRuntimeHeartbeatRequest() {
+  const response = await fetch("/api/runtime/heartbeat", {
+    method: "POST",
+    credentials: "include"
+  });
+  return readJson(response);
+}
+
 export async function addWorkspaceSshKeyRequest(payload, csrfToken) {
   const response = await fetch("/api/workspace/ssh-keys", {
     method: "POST",
@@ -112,6 +120,15 @@ export async function fetchAdminUsersRequest() {
 
 export async function fetchAdminContainersRequest() {
   const response = await fetch("/api/admin/containers", { credentials: "include" });
+  return readJson(response);
+}
+
+export async function syncAllAdminContainersRequest(csrfToken) {
+  const response = await fetch("/api/admin/containers/sync-all", {
+    method: "POST",
+    credentials: "include",
+    headers: buildHeaders(csrfToken)
+  });
   return readJson(response);
 }
 

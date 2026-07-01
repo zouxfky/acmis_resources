@@ -7,7 +7,11 @@ export function WorkspaceOverview({
 }) {
   const maxJoinedContainerCount = Number(session?.max_containers_per_user);
   const maxSshKeyCount = Number(session?.max_ssh_keys_per_user);
-  const joinedContainerSummaryLabel = `${joinedContainers.length} / ${workspaceContainers.length}`;
+  const onlineContainers = workspaceContainers.filter((item) => item.status === "active");
+  const abnormalContainers = workspaceContainers.filter((item) => item.status !== "active");
+  const offlineContainers = workspaceContainers.filter((item) => item.status === "offline");
+  const disabledContainers = workspaceContainers.filter((item) => item.status === "disabled");
+  const onlineContainerSummaryLabel = `${onlineContainers.length} / ${workspaceContainers.length}`;
   const sshKeyLimitLabel = Number.isFinite(maxSshKeyCount) && maxSshKeyCount > 0
     ? `上限 ${maxSshKeyCount} 把`
     : "";
@@ -18,9 +22,26 @@ export function WorkspaceOverview({
   return (
     <section className="overview-grid workspace-overview-grid">
       <article className="overview-card accent-card quota-overview-card">
-        <span>已加入容器</span>
-        <strong>{joinedContainerSummaryLabel}</strong>
-        <p>{joinedContainers.length > 0 ? joinedContainers.map((item) => item.name).join(" / ") : "当前还没有加入任何容器"}</p>
+        <span>在线容器</span>
+        <strong>{onlineContainerSummaryLabel}</strong>
+        {abnormalContainers.length > 0 ? (
+          <div className="container-health-summary">
+            {offlineContainers.length > 0 ? (
+              <p>
+                <span>离线容器：</span>
+                {offlineContainers.map((item) => item.name).join(" / ")}
+              </p>
+            ) : null}
+            {disabledContainers.length > 0 ? (
+              <p>
+                <span>停用容器：</span>
+                {disabledContainers.map((item) => item.name).join(" / ")}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="container-health-ok">全部在线</p>
+        )}
       </article>
 
       <article className="overview-card quota-overview-card">

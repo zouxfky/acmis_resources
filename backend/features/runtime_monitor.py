@@ -49,6 +49,61 @@ _INFLIGHT_IDS: set[int] = set()
 _INFLIGHT_LOCK = threading.Lock()
 _RUNTIME_NOTICE_KEYS: set[tuple[int, str, str]] = set()
 _RUNTIME_NOTICE_LOCK = threading.Lock()
+_ACTIVITY_LOCK = threading.Lock()
+_LAST_ACTIVE_HEARTBEAT_AT = 0.0
+ACTIVE_HEARTBEAT_TTL_SECONDS = 90
+RUNTIME_CACHE_TTL_SECONDS = 60
+_COLLECT_ROUND_LOCK = threading.Lock()
+
+
+def record_runtime_active_heartbeat() -> None:
+    global _LAST_ACTIVE_HEARTBEAT_AT
+    with _ACTIVITY_LOCK:
+        _LAST_ACTIVE_HEARTBEAT_AT = time.time()
+
+
+def is_runtime_monitor_active() -> bool:
+    with _ACTIVITY_LOCK:
+        last_active_heartbeat_at = _LAST_ACTIVE_HEARTBEAT_AT
+    return time.time() - last_active_heartbeat_at <= ACTIVE_HEARTBEAT_TTL_SECONDS
+
+
+def get_runtime_cache_age_seconds() -> Optional[int]:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(c.id) AS monitored_count,
+                COUNT(s.container_id) AS snapshot_count,
+                MAX(strftime('%s', 'now', 'localtime') - strftime('%s', s.updated_at)) AS max_age_seconds
+            FROM containers c
+            LEFT JOIN container_runtime_system s ON s.container_id = c.id
+            WHERE c.status IN ('active', 'offline')
+            """
+        ).fetchone()
+
+    if not row or int(row["monitored_count"] or 0) == 0:
+        return 0
+    if int(row["snapshot_count"] or 0) < int(row["monitored_count"] or 0):
+        return None
+    max_age_seconds = row["max_age_seconds"]
+    return max(0, int(max_age_seconds)) if max_age_seconds is not None else None
+
+
+def is_runtime_cache_stale() -> tuple[bool, Optional[int]]:
+    cache_age_seconds = get_runtime_cache_age_seconds()
+    return cache_age_seconds is None or cache_age_seconds >= RUNTIME_CACHE_TTL_SECONDS, cache_age_seconds
+
+
+def request_runtime_active_refresh() -> dict:
+    record_runtime_active_heartbeat()
+    is_stale, cache_age_seconds = is_runtime_cache_stale()
+    return {
+        "ok": True,
+        "cache_age_seconds": cache_age_seconds,
+        "cache_ttl_seconds": RUNTIME_CACHE_TTL_SECONDS,
+        "cache_stale": is_stale,
+    }
 
 
 def sync_container_full_user_access(container_id: int) -> None:
@@ -179,43 +234,54 @@ class RuntimeMonitorService:
                 break
 
     def collect_once(self) -> None:
-        container_rows = fetch_runtime_container_rows()
-        if not container_rows:
+        if not is_runtime_monitor_active():
+            return
+        is_stale, _cache_age_seconds = is_runtime_cache_stale()
+        if not is_stale:
+            return
+        if not _COLLECT_ROUND_LOCK.acquire(blocking=False):
             return
 
-        joined_user_map = fetch_container_joined_user_map([int(row["id"]) for row in container_rows])
-        executor = ThreadPoolExecutor(max_workers=max(1, RUNTIME_MONITOR_MAX_WORKERS))
-        future_map = {
-            executor.submit(self._collect_container, row, joined_user_map.get(int(row["id"]), [])): row
-            for row in container_rows
-        }
         try:
-            done, not_done = wait(
-                future_map.keys(),
-                timeout=RUNTIME_COLLECT_TOTAL_TIMEOUT_SECONDS,
-                return_when=ALL_COMPLETED,
-            )
+            container_rows = fetch_runtime_container_rows()
+            if not container_rows:
+                return
 
-            for future in done:
-                try:
-                    future.result()
-                except Exception:
-                    LOGGER.exception("runtime monitor worker failed")
-
-            if not_done:
-                timeout_container_labels = [
-                    f'{future_map[future]["name"]}({future_map[future]["id"]})'
-                    for future in not_done
-                ]
-                LOGGER.warning(
-                    "runtime monitor round timed out after %ss, unfinished containers: %s",
-                    RUNTIME_COLLECT_TOTAL_TIMEOUT_SECONDS,
-                    ", ".join(timeout_container_labels),
+            joined_user_map = fetch_container_joined_user_map([int(row["id"]) for row in container_rows])
+            executor = ThreadPoolExecutor(max_workers=max(1, RUNTIME_MONITOR_MAX_WORKERS))
+            future_map = {
+                executor.submit(self._collect_container, row, joined_user_map.get(int(row["id"]), [])): row
+                for row in container_rows
+            }
+            try:
+                done, not_done = wait(
+                    future_map.keys(),
+                    timeout=RUNTIME_COLLECT_TOTAL_TIMEOUT_SECONDS,
+                    return_when=ALL_COMPLETED,
                 )
-                for future in not_done:
-                    future.cancel()
+
+                for future in done:
+                    try:
+                        future.result()
+                    except Exception:
+                        LOGGER.exception("runtime monitor worker failed")
+
+                if not_done:
+                    timeout_container_labels = [
+                        f'{future_map[future]["name"]}({future_map[future]["id"]})'
+                        for future in not_done
+                    ]
+                    LOGGER.warning(
+                        "runtime monitor round timed out after %ss, unfinished containers: %s",
+                        RUNTIME_COLLECT_TOTAL_TIMEOUT_SECONDS,
+                        ", ".join(timeout_container_labels),
+                    )
+                    for future in not_done:
+                        future.cancel()
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            _COLLECT_ROUND_LOCK.release()
 
     def _collect_container(self, container_row: dict, joined_users: list[dict]) -> None:
         collect_container_runtime_row(container_row, joined_users)

@@ -13,7 +13,9 @@ from backend.core.security import hash_password, require_admin_user
 from backend.features.admin_shared import cleanup_orphaned_ssh_keys, fetch_admin_users
 from backend.features.container_ssh_access import (
     acquire_container_user_sync_locks,
+    delete_container_user_home,
     fetch_user_joined_container_rows,
+    rename_container_user_home,
     sync_container_user_authorized_keys,
 )
 from backend.schemas import AdminUserCreatePayload, AdminUserUpdatePayload
@@ -117,36 +119,58 @@ def update_admin_user(user_id: int, payload: AdminUserUpdatePayload, request: Re
             (user_id,),
         ).fetchone()
         if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User does not exist")
+        old_username = str(existing["username"])
+        username_changed = username != old_username
         if admin_user["id"] == user_id and role != "admin":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能移除当前登录账户的管理员角色")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove admin role from the current account")
         if existing["role"] == "admin":
-            if username != str(existing["username"]):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户暂不支持修改用户名")
+            if username_changed:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin usernames cannot be changed")
             if role != "admin":
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户不能移除管理员角色")
-        if username != str(existing["username"]):
-            joined_container_row = connection.execute(
-                """
-                SELECT 1
-                FROM ssh_key_container_bindings scb
-                JOIN user_ssh_key_bindings ub ON ub.ssh_key_id = scb.ssh_key_id
-                WHERE ub.user_id = ?
-                LIMIT 1
-                """,
-                (user_id,),
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin accounts cannot remove admin role")
+        if username_changed:
+            duplicate_user = connection.execute(
+                "SELECT 1 FROM users WHERE username = ? AND id != ? LIMIT 1",
+                (username, user_id),
             ).fetchone()
-            if joined_container_row:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="该用户已经接入过容器，暂不支持直接修改用户名",
-                )
+            if duplicate_user:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
 
         joined_container_rows = fetch_user_joined_container_rows(user_id)
-        active_container_ids = [int(row["id"]) for row in joined_container_rows if row["status"] == "active"]
-        lock_items = [(container_id, user_id) for container_id in active_container_ids]
+        joined_container_ids = [int(row["id"]) for row in joined_container_rows]
+        lock_items = [(container_id, user_id) for container_id in joined_container_ids]
 
         with acquire_container_user_sync_locks(lock_items):
+            renamed_container_ids: list[int] = []
+            if username_changed:
+                try:
+                    for container_id in joined_container_ids:
+                        rename_container_user_home(
+                            container_id,
+                            user_id,
+                            old_username,
+                            username,
+                            allow_inactive=True,
+                        )
+                        renamed_container_ids.append(container_id)
+                except Exception as exc:
+                    for rollback_container_id in reversed(renamed_container_ids):
+                        try:
+                            rename_container_user_home(
+                                rollback_container_id,
+                                user_id,
+                                username,
+                                old_username,
+                                allow_inactive=True,
+                            )
+                        except Exception:
+                            pass
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Remote username migration failed; database was not updated",
+                    ) from exc
+
             try:
                 if new_password:
                     connection.execute(
@@ -199,53 +223,94 @@ def update_admin_user(user_id: int, payload: AdminUserUpdatePayload, request: Re
                     )
                 connection.commit()
             except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                if username_changed:
+                    for rollback_container_id in reversed(renamed_container_ids):
+                        try:
+                            rename_container_user_home(
+                                rollback_container_id,
+                                user_id,
+                                username,
+                                old_username,
+                                allow_inactive=True,
+                            )
+                        except Exception:
+                            pass
                 if "users.username" in str(exc):
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已存在") from exc
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists") from exc
                 raise
             except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="用户更新失败") from exc
+                connection.rollback()
+                if username_changed:
+                    for rollback_container_id in reversed(renamed_container_ids):
+                        try:
+                            rename_container_user_home(
+                                rollback_container_id,
+                                user_id,
+                                username,
+                                old_username,
+                                allow_inactive=True,
+                            )
+                        except Exception:
+                            pass
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User update failed") from exc
 
-            if joined_container_rows:
-                for container_id in active_container_ids:
-                    try:
-                        sync_container_user_authorized_keys(container_id, user_id)
-                    except Exception:
-                        pass
+        if joined_container_rows:
+            for container_id in joined_container_ids:
+                try:
+                    sync_container_user_authorized_keys(container_id, user_id, allow_inactive=True)
+                except Exception:
+                    pass
 
         updated = _fetch_admin_user_detail(connection, user_id)
-    return {"ok": True, "item": serialize_user(updated), "message": "用户已更新"}
+    return {"ok": True, "item": serialize_user(updated), "message": "User updated"}
 
 
 @router.delete("/api/admin/users/{user_id}")
 def delete_admin_user(user_id: int, request: Request) -> dict:
     admin_user = require_admin_user(request, require_csrf=True)
     if admin_user["id"] == user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能删除当前登录的管理员账户")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the current admin account")
 
     with get_connection() as connection:
         existing = connection.execute("SELECT id, role FROM users WHERE id = ?", (user_id,)).fetchone()
         if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User does not exist")
         if existing["role"] == "admin":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="管理员账户不允许删除")
-        joined_container_row = connection.execute(
-            """
-            SELECT 1
-            FROM ssh_key_container_bindings scb
-            JOIN user_ssh_key_bindings ub ON ub.ssh_key_id = scb.ssh_key_id
-            WHERE ub.user_id = ?
-            LIMIT 1
-            """,
-            (user_id,),
-        ).fetchone()
-        if joined_container_row:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该用户仍有容器接入记录，请先退出所有容器后再删除",
-            )
-        connection.execute("DELETE FROM user_ssh_key_bindings WHERE user_id = ?", (user_id,))
-        connection.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        cleanup_orphaned_ssh_keys(connection)
-        connection.commit()
-    return {"ok": True, "message": "用户已删除"}
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin accounts cannot be deleted")
+
+    joined_container_rows = fetch_user_joined_container_rows(user_id)
+    joined_container_ids = [int(row["id"]) for row in joined_container_rows]
+    lock_items = [(container_id, user_id) for container_id in joined_container_ids]
+    failed_sync_container_ids: list[int] = []
+
+    with acquire_container_user_sync_locks(lock_items):
+        for container_id in joined_container_ids:
+            try:
+                delete_container_user_home(
+                    container_id,
+                    user_id,
+                    allow_inactive=True,
+                )
+            except Exception:
+                failed_sync_container_ids.append(container_id)
+
+        with get_connection() as connection:
+            existing = connection.execute("SELECT id, role FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not existing:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User does not exist")
+            if existing["role"] == "admin":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin accounts cannot be deleted")
+            connection.execute("DELETE FROM user_ssh_key_bindings WHERE user_id = ?", (user_id,))
+            connection.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+            connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            cleanup_orphaned_ssh_keys(connection)
+            connection.commit()
+
+    if failed_sync_container_ids:
+        return {
+            "ok": True,
+            "message": f"User deleted. Failed to delete remote home on {len(failed_sync_container_ids)} container(s).",
+            "failed_sync_container_ids": failed_sync_container_ids,
+        }
+    return {"ok": True, "message": "User deleted"}

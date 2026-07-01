@@ -6,10 +6,10 @@ import {
   fetchAdminContainersRequest,
   fetchAdminUsersRequest,
   saveAdminContainerRequest,
-  saveAdminUserRequest
+  saveAdminUserRequest,
+  syncAllAdminContainersRequest
 } from "../api/client";
 import { createEmptyAdminContainerForm, emptyAdminUserForm } from "../app/constants";
-import { usePollingLeader } from "./usePollingLeader";
 import {
   buildAdminContainerConfirmItems,
   buildAdminContainerPayload,
@@ -19,6 +19,8 @@ import {
   isAdminContainerPayloadChanged,
   isAdminUserPayloadChanged
 } from "./adminControllerHelpers";
+
+const SYNC_ALL_CONTAINERS_COOLDOWN_SECONDS = 3 * 60;
 
 export function useAdminController({
   session,
@@ -42,11 +44,9 @@ export function useAdminController({
   const [selectedAdminContainerId, setSelectedAdminContainerId] = useState(null);
   const [adminUserDialogOpen, setAdminUserDialogOpen] = useState(false);
   const [adminContainerDialogOpen, setAdminContainerDialogOpen] = useState(false);
-  const { isPollingLeader: isAdminPollingLeader } = usePollingLeader({
-    enabled: Boolean(session && session.role === "admin" && activeView === "admin"),
-    scopeKey: `admin:${session?.id || "guest"}`
-  });
-
+  const [syncAllContainersStatus, setSyncAllContainersStatus] = useState("idle");
+  const [syncAllContainersCooldownUntil, setSyncAllContainersCooldownUntil] = useState(0);
+  const [syncAllContainersNow, setSyncAllContainersNow] = useState(Date.now());
   function resetAdminState() {
     setAdminUsers([]);
     setAdminContainers([]);
@@ -62,7 +62,29 @@ export function useAdminController({
     setSelectedAdminContainerId(null);
     setAdminUserDialogOpen(false);
     setAdminContainerDialogOpen(false);
+    setSyncAllContainersStatus("idle");
+    setSyncAllContainersCooldownUntil(0);
+    setSyncAllContainersNow(Date.now());
   }
+
+  const syncAllContainersCooldownRemainingSeconds = Math.max(
+    0,
+    Math.ceil((syncAllContainersCooldownUntil - syncAllContainersNow) / 1000)
+  );
+
+  useEffect(() => {
+    if (syncAllContainersCooldownRemainingSeconds <= 0) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setSyncAllContainersNow(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [syncAllContainersCooldownRemainingSeconds]);
 
   async function loadAdminData(options = {}) {
     const { silent = false } = options;
@@ -108,17 +130,6 @@ export function useAdminController({
 
     loadAdminData();
 
-    if (!isAdminPollingLeader) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      loadAdminData({ silent: true });
-    }, 10000);
-
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         loadAdminData({ silent: true });
@@ -128,10 +139,9 @@ export function useAdminController({
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [session, activeView, isAdminPollingLeader]);
+  }, [session, activeView]);
 
   function updateAdminUserField(field, value) {
     setAdminUserForm((current) => ({
@@ -331,12 +341,12 @@ export function useAdminController({
     setAdminUsersMessage("");
 
     try {
-      await deleteAdminUserRequest(userId, csrfToken);
+      const data = await deleteAdminUserRequest(userId, csrfToken);
       setAdminUsers((current) => current.filter((item) => item.id !== userId));
 
       setAdminUsersStatus("success");
       setAdminUsersMessage("");
-      showFloatingTip("删除用户成功");
+      showFloatingTip(data?.message || "User deleted");
       if (adminUserForm.id === userId) {
         setAdminUserForm({ ...emptyAdminUserForm });
         setAdminUserDialogOpen(false);
@@ -380,12 +390,12 @@ export function useAdminController({
     setAdminContainersMessage("");
 
     try {
-      await saveAdminContainerRequest(containerId, payload, csrfToken);
+      const data = await saveAdminContainerRequest(containerId, payload, csrfToken);
       await loadAdminData();
 
       setAdminContainersStatus("success");
       setAdminContainersMessage("");
-      showFloatingTip(containerId ? "服务器已更新" : "新增服务器成功");
+      showFloatingTip(data?.message || (containerId ? "Server updated" : "Server created"));
       setAdminContainerForm(createEmptyAdminContainerForm());
       setSelectedAdminContainerId(null);
       setAdminContainerDialogOpen(false);
@@ -393,6 +403,28 @@ export function useAdminController({
       setAdminContainersStatus("error");
       setAdminContainersMessage("");
       showFloatingTip(error instanceof Error ? error.message : "服务器保存失败", "error");
+    }
+  }
+
+  async function syncAllAdminContainers() {
+    if (syncAllContainersStatus === "loading" || syncAllContainersCooldownRemainingSeconds > 0) {
+      return;
+    }
+
+    setSyncAllContainersStatus("loading");
+    setSyncAllContainersNow(Date.now());
+    setSyncAllContainersCooldownUntil(Date.now() + SYNC_ALL_CONTAINERS_COOLDOWN_SECONDS * 1000);
+
+    try {
+      const data = await syncAllAdminContainersRequest(csrfToken);
+      await loadAdminData({ silent: true });
+      setSyncAllContainersStatus("idle");
+      showFloatingTip(data?.message || "同步刷新完成");
+    } catch (error) {
+      setSyncAllContainersStatus("idle");
+      setSyncAllContainersCooldownUntil(0);
+      setSyncAllContainersNow(Date.now());
+      showFloatingTip(error instanceof Error ? error.message : "同步刷新失败", "error");
     }
   }
 
@@ -451,6 +483,8 @@ export function useAdminController({
     selectedAdminContainerId,
     adminUserDialogOpen,
     adminContainerDialogOpen,
+    syncAllContainersStatus,
+    syncAllContainersCooldownRemainingSeconds,
     setActiveAdminSection,
     setAdminUsers,
     setAdminContainers,
@@ -470,6 +504,7 @@ export function useAdminController({
     executeDeleteAdminUser,
     handleAdminContainerSubmit,
     executeAdminContainerSubmit,
+    syncAllAdminContainers,
     handleDeleteAdminContainer,
     executeDeleteAdminContainer,
     loadAdminData

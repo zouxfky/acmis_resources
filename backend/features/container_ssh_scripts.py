@@ -20,6 +20,181 @@ def render_authorized_keys_text(public_keys: list[str]) -> str:
     return "\n".join(public_keys) + "\n"
 
 
+def build_delete_user_home_command(linux_username: str) -> str:
+    quoted_username = shlex.quote(linux_username)
+    quoted_home_root = shlex.quote(CONTAINER_USER_HOME_ROOT)
+    return f"""
+set -e
+USERNAME={quoted_username}
+HOME_ROOT={quoted_home_root}
+GROUP_NAME="$USERNAME"
+
+case "$USERNAME" in
+  ""|.|..|*/*)
+    echo "invalid username" >&2
+    exit 64
+    ;;
+esac
+
+HOME_ROOT="$(realpath -m "$HOME_ROOT")"
+HOME_DIR="$HOME_ROOT/$USERNAME"
+RESOLVED_HOME_DIR="$(realpath -m "$HOME_DIR")"
+
+case "$RESOLVED_HOME_DIR" in
+  "$HOME_ROOT"/*) ;;
+  *)
+    echo "refuse to delete home outside configured root" >&2
+    exit 65
+    ;;
+esac
+
+if getent passwd "$USERNAME" >/dev/null; then
+  userdel "$USERNAME"
+fi
+
+if [ -d "$RESOLVED_HOME_DIR" ]; then
+  rm -rf -- "$RESOLVED_HOME_DIR"
+fi
+
+if getent group "$GROUP_NAME" >/dev/null; then
+  groupdel "$GROUP_NAME" || true
+fi
+""".strip()
+
+
+def build_rename_user_home_command(
+    old_linux_username: str,
+    new_linux_username: str,
+    linux_uid: int,
+    linux_gid: int,
+    authorized_keys_text: str,
+) -> str:
+    payload_b64 = base64.b64encode(authorized_keys_text.encode("utf-8")).decode("ascii")
+    quoted_old_username = shlex.quote(old_linux_username)
+    quoted_new_username = shlex.quote(new_linux_username)
+    quoted_home_root = shlex.quote(CONTAINER_USER_HOME_ROOT)
+    quoted_linux_uid = shlex.quote(str(int(linux_uid)))
+    quoted_linux_gid = shlex.quote(str(int(linux_gid)))
+    quoted_payload = shlex.quote(payload_b64)
+    return f"""
+set -e
+OLD_USERNAME={quoted_old_username}
+NEW_USERNAME={quoted_new_username}
+HOME_ROOT={quoted_home_root}
+TARGET_UID={quoted_linux_uid}
+TARGET_GID={quoted_linux_gid}
+PAYLOAD_B64={quoted_payload}
+GROUP_NAME="$NEW_USERNAME"
+
+case "$OLD_USERNAME" in
+  ""|.|..|*/*)
+    echo "invalid old username" >&2
+    exit 64
+    ;;
+esac
+
+case "$NEW_USERNAME" in
+  ""|.|..|*/*)
+    echo "invalid new username" >&2
+    exit 64
+    ;;
+esac
+
+HOME_ROOT="$(realpath -m "$HOME_ROOT")"
+OLD_HOME="$HOME_ROOT/$OLD_USERNAME"
+NEW_HOME="$HOME_ROOT/$NEW_USERNAME"
+RESOLVED_OLD_HOME="$(realpath -m "$OLD_HOME")"
+RESOLVED_NEW_HOME="$(realpath -m "$NEW_HOME")"
+
+case "$RESOLVED_OLD_HOME" in
+  "$HOME_ROOT"/*) ;;
+  *)
+    echo "refuse to migrate old home outside configured root" >&2
+    exit 65
+    ;;
+esac
+
+case "$RESOLVED_NEW_HOME" in
+  "$HOME_ROOT"/*) ;;
+  *)
+    echo "refuse to migrate new home outside configured root" >&2
+    exit 65
+    ;;
+esac
+
+if [ "$OLD_USERNAME" != "$NEW_USERNAME" ] && getent passwd "$NEW_USERNAME" >/dev/null && getent passwd "$OLD_USERNAME" >/dev/null; then
+  echo "new username already exists" >&2
+  exit 66
+fi
+
+if getent group "$NEW_USERNAME" >/dev/null; then
+  CURRENT_GID="$(getent group "$NEW_USERNAME" | cut -d: -f3)"
+  if [ "$CURRENT_GID" != "$TARGET_GID" ]; then
+    groupmod -g "$TARGET_GID" "$NEW_USERNAME"
+  fi
+elif [ "$OLD_USERNAME" != "$NEW_USERNAME" ] && getent group "$OLD_USERNAME" >/dev/null; then
+  groupmod -n "$NEW_USERNAME" "$OLD_USERNAME"
+  CURRENT_GID="$(getent group "$NEW_USERNAME" | cut -d: -f3)"
+  if [ "$CURRENT_GID" != "$TARGET_GID" ]; then
+    groupmod -g "$TARGET_GID" "$NEW_USERNAME"
+  fi
+else
+  groupadd -g "$TARGET_GID" "$NEW_USERNAME"
+fi
+
+if [ "$OLD_USERNAME" != "$NEW_USERNAME" ] && getent passwd "$OLD_USERNAME" >/dev/null; then
+  usermod -l "$NEW_USERNAME" "$OLD_USERNAME"
+fi
+
+if getent passwd "$NEW_USERNAME" >/dev/null; then
+  usermod -u "$TARGET_UID" -g "$TARGET_GID" -d "$NEW_HOME" -s /bin/bash "$NEW_USERNAME"
+else
+  install -d "$HOME_ROOT"
+  useradd -M -u "$TARGET_UID" -g "$TARGET_GID" -d "$NEW_HOME" -s /bin/bash "$NEW_USERNAME"
+fi
+
+if [ "$OLD_HOME" != "$NEW_HOME" ] && [ -d "$OLD_HOME" ]; then
+  if [ -e "$NEW_HOME" ]; then
+    echo "new home already exists" >&2
+    exit 67
+  fi
+  mv -- "$OLD_HOME" "$NEW_HOME"
+fi
+
+install -d -m 700 -o "$NEW_USERNAME" -g "$GROUP_NAME" "$NEW_HOME"
+install -d -m 700 -o "$NEW_USERNAME" -g "$GROUP_NAME" "$NEW_HOME/.ssh"
+chown -R "$NEW_USERNAME:$GROUP_NAME" "$NEW_HOME"
+
+AUTH_FILE="$NEW_HOME/.ssh/authorized_keys"
+LOCK_FILE="$NEW_HOME/.ssh/.authorized_keys.lock"
+TMP_FILE="$(mktemp "$NEW_HOME/.ssh/authorized_keys.tmp.XXXXXX")"
+cleanup_tmp_file() {{
+  if [ -n "$TMP_FILE" ] && [ -e "$TMP_FILE" ]; then
+    rm -f "$TMP_FILE"
+  fi
+}}
+trap cleanup_tmp_file EXIT INT TERM HUP
+
+(
+  flock -x 9
+  touch "$AUTH_FILE"
+  chown "$NEW_USERNAME:$GROUP_NAME" "$AUTH_FILE"
+  chmod 600 "$AUTH_FILE"
+
+  if [ -n "$PAYLOAD_B64" ]; then
+    printf '%s' "$PAYLOAD_B64" | base64 -d > "$TMP_FILE"
+  else
+    : > "$TMP_FILE"
+  fi
+
+  chown "$NEW_USERNAME:$GROUP_NAME" "$TMP_FILE"
+  chmod 600 "$TMP_FILE"
+  mv "$TMP_FILE" "$AUTH_FILE"
+) 9>"$LOCK_FILE"
+trap - EXIT INT TERM HUP
+""".strip()
+
+
 def build_sync_command(linux_username: str, linux_uid: int, linux_gid: int, authorized_keys_text: str) -> str:
     payload_b64 = base64.b64encode(authorized_keys_text.encode("utf-8")).decode("ascii")
     quoted_username = shlex.quote(linux_username)

@@ -15,6 +15,7 @@ from backend.features.runtime import (
     fetch_container_runtime_payload,
     fetch_runtime_snapshot_maps,
 )
+from backend.features.runtime_monitor import request_runtime_active_refresh
 from backend.features.workspace_access import (
     delete_workspace_ssh_key_and_sync,
     join_workspace_container_access,
@@ -224,6 +225,12 @@ def fetch_workspace_payload(user_id: int) -> dict:
 def get_workspace(request: Request) -> dict:
     user = require_authenticated_user(request)
     return fetch_workspace_payload(user["id"])
+
+
+@router.post("/api/runtime/heartbeat")
+def runtime_active_heartbeat(request: Request) -> dict:
+    require_authenticated_user(request)
+    return request_runtime_active_refresh()
 
 
 @router.get("/api/workspace/containers/{container_id}/runtime")

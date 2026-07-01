@@ -121,6 +121,9 @@ export default function App() {
             onStartCreateAdminContainer={controller.startCreateAdminContainer}
             onStartEditAdminContainer={controller.startEditAdminContainer}
             onDeleteAdminContainer={controller.handleDeleteAdminContainer}
+            onSyncAllAdminContainers={controller.syncAllAdminContainers}
+            syncAllContainersStatus={controller.syncAllContainersStatus}
+            syncAllContainersCooldownRemainingSeconds={controller.syncAllContainersCooldownRemainingSeconds}
           />
         ) : (
           <WorkspacePage
@@ -191,6 +194,7 @@ export default function App() {
 
       <ConfirmDialog
         confirmDialog={controller.confirmDialog}
+        submitting={controller.confirmDialogSubmitting}
         onSubmit={controller.handleConfirmDialogSubmit}
         onClose={() => controller.setConfirmDialog(null)}
       />

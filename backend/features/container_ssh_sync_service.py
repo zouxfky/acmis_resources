@@ -13,6 +13,8 @@ from backend.features.container_ssh_client import (
     open_root_client,
 )
 from backend.features.container_ssh_scripts import (
+    build_delete_user_home_command,
+    build_rename_user_home_command,
     build_sync_command,
     normalize_public_keys,
     render_authorized_keys_text,
@@ -221,6 +223,93 @@ def sync_container_user_authorized_keys_payload(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"容器内 SSH 授权同步失败：{payload.host}:{payload.ssh_port}",
+        ) from exc
+    finally:
+        client.close()
+
+
+def delete_container_user_home(container_id: int, user_id: int, allow_inactive: bool = False) -> None:
+    payload = fetch_container_user_sync_payload(container_id, user_id, allow_inactive=allow_inactive)
+    command = build_delete_user_home_command(payload.linux_username)
+
+    try:
+        client = open_root_client(payload.host, payload.ssh_port, payload.root_password)
+    except ContainerSSHConnectError as exc:
+        mark_container_offline(payload.container_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Container cannot connect: {payload.host}:{payload.ssh_port}",
+        ) from exc
+
+    try:
+        exec_ssh_command(client, command)
+    except HTTPException:
+        raise
+    except ContainerSSHConnectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Container cannot connect: {payload.host}:{payload.ssh_port}",
+        ) from exc
+    except Exception as exc:
+        LOGGER.exception(
+            "container user home delete failed for container=%s user=%s",
+            payload.container_id,
+            payload.user_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Container user home delete failed: {payload.host}:{payload.ssh_port}",
+        ) from exc
+    finally:
+        client.close()
+
+
+def rename_container_user_home(
+    container_id: int,
+    user_id: int,
+    old_linux_username: str,
+    new_linux_username: str,
+    allow_inactive: bool = False,
+) -> None:
+    payload = fetch_container_user_sync_payload(container_id, user_id, allow_inactive=allow_inactive)
+    payload.linux_username = validate_linux_username(old_linux_username)
+    new_linux_username = validate_linux_username(new_linux_username)
+    public_keys = fetch_user_container_public_keys(user_id, container_id)
+    command = build_rename_user_home_command(
+        payload.linux_username,
+        new_linux_username,
+        payload.linux_uid,
+        payload.linux_gid,
+        render_authorized_keys_text(public_keys),
+    )
+
+    try:
+        client = open_root_client(payload.host, payload.ssh_port, payload.root_password)
+    except ContainerSSHConnectError as exc:
+        mark_container_offline(payload.container_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Container cannot connect: {payload.host}:{payload.ssh_port}",
+        ) from exc
+
+    try:
+        exec_ssh_command(client, command)
+    except HTTPException:
+        raise
+    except ContainerSSHConnectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Container cannot connect: {payload.host}:{payload.ssh_port}",
+        ) from exc
+    except Exception as exc:
+        LOGGER.exception(
+            "container user rename failed for container=%s user=%s",
+            payload.container_id,
+            payload.user_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Container user rename failed: {payload.host}:{payload.ssh_port}",
         ) from exc
     finally:
         client.close()

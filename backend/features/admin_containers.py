@@ -1,4 +1,6 @@
 import sqlite3
+import threading
+import time
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -30,6 +32,83 @@ from backend.schemas import AdminContainerCreatePayload, AdminContainerUpdatePay
 
 
 router = APIRouter()
+SYNC_ALL_COOLDOWN_SECONDS = 3 * 60
+_SYNC_ALL_LOCK = threading.Lock()
+_SYNC_ALL_NEXT_ALLOWED_AT = 0.0
+
+
+def _sync_container_joined_user_access(container_id: int, allow_inactive: bool = False) -> list[int]:
+    joined_user_ids = fetch_container_joined_user_ids(container_id)
+    lock_items = [(container_id, user_id) for user_id in joined_user_ids]
+    failed_user_ids: list[int] = []
+
+    with acquire_container_user_sync_locks(lock_items):
+        for user_id in joined_user_ids:
+            try:
+                sync_container_user_authorized_keys(
+                    container_id,
+                    user_id,
+                    allow_inactive=allow_inactive,
+                )
+            except Exception:
+                failed_user_ids.append(user_id)
+
+    return failed_user_ids
+
+
+def _reserve_sync_all_slot() -> int:
+    global _SYNC_ALL_NEXT_ALLOWED_AT
+
+    now = time.monotonic()
+    with _SYNC_ALL_LOCK:
+        remaining_seconds = int(max(0, _SYNC_ALL_NEXT_ALLOWED_AT - now))
+        if remaining_seconds > 0:
+            return remaining_seconds
+        _SYNC_ALL_NEXT_ALLOWED_AT = now + SYNC_ALL_COOLDOWN_SECONDS
+    return 0
+
+
+def _sync_all_container_user_access() -> dict:
+    with get_connection() as connection:
+        container_rows = connection.execute(
+            """
+            SELECT id, name, host, ssh_port, status
+            FROM containers
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    items = []
+    failed_user_syncs = 0
+    synced_user_syncs = 0
+
+    for row in container_rows:
+        container_id = int(row["id"])
+        joined_user_ids = fetch_container_joined_user_ids(container_id)
+        failed_user_ids = _sync_container_joined_user_access(container_id, allow_inactive=True)
+        synced_count = len(joined_user_ids) - len(failed_user_ids)
+        synced_user_syncs += synced_count
+        failed_user_syncs += len(failed_user_ids)
+        items.append(
+            {
+                "id": container_id,
+                "name": row["name"],
+                "host": row["host"],
+                "ssh_port": row["ssh_port"],
+                "status": row["status"],
+                "total_users": len(joined_user_ids),
+                "synced_users": synced_count,
+                "failed_user_ids": failed_user_ids,
+            }
+        )
+
+    return {
+        "containers": len(items),
+        "synced_user_syncs": synced_user_syncs,
+        "failed_user_syncs": failed_user_syncs,
+        "cooldown_seconds": SYNC_ALL_COOLDOWN_SECONDS,
+        "items": items,
+    }
 
 
 def _mark_container_disabled_for_delete(container_id: int) -> str:
@@ -70,6 +149,26 @@ def _restore_container_status(container_id: int, container_status: str) -> None:
 def list_admin_containers(request: Request) -> dict:
     require_admin_user(request)
     return {"items": fetch_admin_containers()}
+
+
+@router.post("/api/admin/containers/sync-all")
+def sync_all_admin_containers(request: Request) -> dict:
+    require_admin_user(request, require_csrf=True)
+    remaining_seconds = _reserve_sync_all_slot()
+    if remaining_seconds > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"同步刷新冷却中，请 {remaining_seconds} 秒后再试",
+        )
+
+    result = _sync_all_container_user_access()
+    failed_count = int(result["failed_user_syncs"])
+    message = (
+        f"同步刷新完成，{failed_count} 个用户同步失败"
+        if failed_count
+        else "同步刷新完成"
+    )
+    return {"ok": True, "message": message, **result}
 
 
 @router.get("/api/admin/containers/{container_id}/runtime")
@@ -207,9 +306,17 @@ def update_admin_container(container_id: int, payload: AdminContainerUpdatePaylo
             raise
 
     collect_container_runtime_now(int(container_id))
+    failed_sync_user_ids = _sync_container_joined_user_access(int(container_id), allow_inactive=True)
     with get_connection() as connection:
         item = fetch_admin_container_detail(connection, int(container_id))
-    return {"ok": True, "item": dict(item), "message": "服务器已更新"}
+    if failed_sync_user_ids:
+        return {
+            "ok": True,
+            "item": dict(item),
+            "message": f"Server updated. Failed to sync {len(failed_sync_user_ids)} user(s).",
+            "failed_sync_user_ids": failed_sync_user_ids,
+        }
+    return {"ok": True, "item": dict(item), "message": "Server updated"}
 
 
 @router.delete("/api/admin/containers/{container_id}")

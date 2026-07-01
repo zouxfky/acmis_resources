@@ -16,8 +16,20 @@ export function AdminPage({
   onDeleteAdminUser,
   onStartCreateAdminContainer,
   onStartEditAdminContainer,
-  onDeleteAdminContainer
+  onDeleteAdminContainer,
+  onSyncAllAdminContainers,
+  syncAllContainersStatus,
+  syncAllContainersCooldownRemainingSeconds
 }) {
+  const syncAllButtonDisabled =
+    syncAllContainersStatus === "loading" || syncAllContainersCooldownRemainingSeconds > 0;
+  const syncAllButtonLabel =
+    syncAllContainersStatus === "loading"
+      ? "同步中"
+      : syncAllContainersCooldownRemainingSeconds > 0
+        ? `${syncAllContainersCooldownRemainingSeconds}秒后可同步`
+        : "同步刷新";
+
   return (
     <>
       <section className="overview-grid admin-overview-grid">
@@ -58,12 +70,24 @@ export function AdminPage({
 
         <section className="workspace-card admin-panel">
           <div className="admin-panel-banner admin-panel-banner-inline">
-            <strong>{activeAdminSectionConfig.label}</strong>
-            <span>
-              {activeAdminSection === "users"
-                ? `当前共 ${adminUsers.length} 个账户`
-                : `当前共 ${adminContainers.length} 台服务器`}
-            </span>
+            <div className="admin-panel-banner-copy">
+              <strong>{activeAdminSectionConfig.label}</strong>
+              <span>
+                {activeAdminSection === "users"
+                  ? `${adminUsers.length} users`
+                  : `${adminContainers.length} servers`}
+              </span>
+            </div>
+            {activeAdminSection === "containers" ? (
+              <button
+                className="ghost-button admin-sync-all-button"
+                type="button"
+                onClick={onSyncAllAdminContainers}
+                disabled={syncAllButtonDisabled}
+              >
+                {syncAllButtonLabel}
+              </button>
+            ) : null}
           </div>
 
           {activeAdminSection === "users" ? (

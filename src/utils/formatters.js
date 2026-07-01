@@ -108,6 +108,45 @@ export function areIdSetsEqual(left, right) {
   return leftIds.every((value, index) => value === rightIds[index]);
 }
 
+function normalizeProcessCommand(command) {
+  return String(command || "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function summarizeRuntimeProcesses(processItems, containerId) {
+  const groupedProcessMap = new Map();
+
+  (processItems || [])
+    .filter((item) => item && typeof item === "object")
+    .forEach((item, index) => {
+      const pid = Number.isFinite(Number(item.pid)) ? Number(item.pid) : null;
+      const owner = String(item.process_user || item.linux_username || "未知用户");
+      const command = normalizeProcessCommand(item.process_name || "");
+      const groupKey = `${owner}\n${command}`;
+      const existingItem = groupedProcessMap.get(groupKey);
+
+      if (existingItem) {
+        existingItem.count += 1;
+        if (pid !== null) {
+          existingItem.pids.push(pid);
+        }
+        return;
+      }
+
+      groupedProcessMap.set(groupKey, {
+        id: pid !== null ? `${containerId}-pid-${pid}` : `${containerId}-process-${index}`,
+        pid,
+        pids: pid !== null ? [pid] : [],
+        owner,
+        command: command || "-",
+        count: 1
+      });
+    });
+
+  return Array.from(groupedProcessMap.values());
+}
+
 export function enrichWorkspaceContainer(container) {
   const cpuRuntimeAvailable = container.cpu_runtime_available !== false;
   const memoryRuntimeAvailable = container.memory_runtime_available !== false;
@@ -120,16 +159,7 @@ export function enrichWorkspaceContainer(container) {
     ? container.gpu_processes.filter(Boolean)
     : [];
   const runtimeProcesses = Array.isArray(container.runtime_processes)
-    ? container.runtime_processes
-        .filter((item) => item && typeof item === "object")
-        .map((item, index) => ({
-          id: Number.isFinite(Number(item.pid))
-            ? `${container.id}-pid-${Number(item.pid)}`
-            : `${container.id}-process-${index}`,
-          pid: Number.isFinite(Number(item.pid)) ? Number(item.pid) : null,
-          owner: String(item.process_user || item.linux_username || "未知用户"),
-          command: String(item.process_name || "").trim() || "-"
-        }))
+    ? summarizeRuntimeProcesses(container.runtime_processes, container.id)
     : [];
   const portMappings = Array.isArray(container.port_mappings)
     ? container.port_mappings
